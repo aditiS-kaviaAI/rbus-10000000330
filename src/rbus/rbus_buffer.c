@@ -245,6 +245,7 @@ void rbusBuffer_WriteDateTimeTLV(rbusBuffer_t buff, rbusDateTime_t const* tv)
     temp.m_tz.m_tzhour      = rbusHostToLittleInt32(tv->m_tz.m_tzhour);
     temp.m_tz.m_tzmin       = rbusHostToLittleInt32(tv->m_tz.m_tzmin);
     temp.m_tz.m_isWest      = rbusHostToLittleInt32(tv->m_tz.m_isWest);
+    temp.m_usec             = rbusHostToLittleInt32(tv->m_usec);
     rbusBuffer_WriteTypeLengthValue(buff, RBUS_DATETIME, sizeof(temp), &temp);
 }
 
@@ -368,12 +369,22 @@ int rbusBuffer_ReadDouble(rbusBuffer_t const buff, double* f64)
     return rc;
 }
 
-int rbusBuffer_ReadDateTime(rbusBuffer_t const buff, rbusDateTime_t* tv)
+int rbusBuffer_ReadDateTime(rbusBuffer_t const buff, rbusDateTime_t* tv, uint16_t length)
 {
-    rbusDateTime_t temp;
-    if(!tv)
+    const uint16_t legacyLength = sizeof(rbusDateTime_t) - sizeof(int32_t);
+    rbusDateTime_t temp = {{0},{0},0};
+
+    if(!tv || (length != legacyLength && length != sizeof(rbusDateTime_t)))
         return -1;
-    int rc = rbusBuffer_Read(buff, &temp, sizeof(rbusDateTime_t));
+
+    /*
+     * The microsecond field was appended to retain the existing wire layout.
+     * A legacy payload has no fractional field and therefore decodes as zero.
+     */
+    int rc = rbusBuffer_Read(buff, &temp, length);
+    if(rc != 0)
+        return rc;
+
     tv->m_time.tm_sec   = rbusLittleToHostInt32(temp.m_time.tm_sec);
     tv->m_time.tm_min   = rbusLittleToHostInt32(temp.m_time.tm_min);
     tv->m_time.tm_hour  = rbusLittleToHostInt32(temp.m_time.tm_hour);
@@ -386,6 +397,7 @@ int rbusBuffer_ReadDateTime(rbusBuffer_t const buff, rbusDateTime_t* tv)
     tv->m_tz.m_tzhour   = rbusLittleToHostInt32(temp.m_tz.m_tzhour);
     tv->m_tz.m_tzmin    = rbusLittleToHostInt32(temp.m_tz.m_tzmin);
     tv->m_tz.m_isWest   = rbusLittleToHostInt32(temp.m_tz.m_isWest);
+    tv->m_usec          = rbusLittleToHostInt32(temp.m_usec);
     return rc;
 }
 

@@ -343,6 +343,28 @@ TEST(rbusValueTest, validate_datetime4)
   exec_validate_test(RBUS_DATETIME,buffer);
 }
 
+TEST(rbusValueTest, validate_datetime_microseconds)
+{
+  char buffer[] = "2026-02-12T09:31:52.575889Z";
+
+  exec_validate_test(RBUS_DATETIME, buffer);
+}
+
+TEST(rbusValueTest, validate_datetime_microseconds_timezone)
+{
+  rbusValue_t value;
+  char* output;
+
+  rbusValue_Init(&value);
+  ASSERT_TRUE(rbusValue_SetFromString(
+      value, RBUS_DATETIME, "2026-02-12T09:31:52.123+01:00"));
+  output = rbusValue_ToString(value, NULL, 0);
+  EXPECT_STREQ(output, "2026-02-12T09:31:52.123000+01:00");
+
+  free(output);
+  rbusValue_Release(value);
+}
+
 TEST(rbusValueTest, validate_bool_1)
 {
   char buffer[8] = {0};
@@ -1001,6 +1023,32 @@ TEST(rbusValueEncDecTlv, enc_dec_tlv_datetime1)
   strftime (buffer,80,"%F %TZ",timeinfo);
 
   exec_encode_decode_tlv_test(RBUS_DATETIME,buffer);
+}
+
+TEST(rbusValueEncDecTlv, enc_dec_tlv_datetime_microseconds)
+{
+  char buffer[] = "2026-02-12T09:31:52.575889Z";
+
+  exec_encode_decode_tlv_test(RBUS_DATETIME, buffer);
+}
+
+TEST(rbusValueTest, datetime_microsecond_comparison)
+{
+  rbusValue_t earlier;
+  rbusValue_t later;
+
+  rbusValue_Init(&earlier);
+  rbusValue_Init(&later);
+
+  ASSERT_TRUE(rbusValue_SetFromString(
+      earlier, RBUS_DATETIME, "2026-02-12T09:31:52.575888Z"));
+  ASSERT_TRUE(rbusValue_SetFromString(
+      later, RBUS_DATETIME, "2026-02-12T09:31:52.575889Z"));
+
+  EXPECT_LT(rbusValue_Compare(earlier, later), 0);
+  EXPECT_GT(rbusValue_Compare(later, earlier), 0);
+
+  rbusValue_Releases(2, earlier, later);
 }
 
 TEST(rbusValueEncDecTlv, enc_dec_tlv_bool)

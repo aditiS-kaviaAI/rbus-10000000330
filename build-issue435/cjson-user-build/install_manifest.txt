@@ -1,0 +1,9 @@
+/home/kavia/workspace/code-generation/rbus-10000000330/build-issue435/cjson-user-install/include/cjson/cJSON.h
+/home/kavia/workspace/code-generation/rbus-10000000330/build-issue435/cjson-user-install/lib/pkgconfig/libcjson.pc
+/home/kavia/workspace/code-generation/rbus-10000000330/build-issue435/cjson-user-install/lib/libcjson.so.1.7.18
+/home/kavia/workspace/code-generation/rbus-10000000330/build-issue435/cjson-user-install/lib/libcjson.so.1
+/home/kavia/workspace/code-generation/rbus-10000000330/build-issue435/cjson-user-install/lib/libcjson.so
+/home/kavia/workspace/code-generation/rbus-10000000330/build-issue435/cjson-user-install/lib/cmake/cJSON/cjson.cmake
+/home/kavia/workspace/code-generation/rbus-10000000330/build-issue435/cjson-user-install/lib/cmake/cJSON/cjson-release.cmake
+/home/kavia/workspace/code-generation/rbus-10000000330/build-issue435/cjson-user-install/lib/cmake/cJSON/cJSONConfig.cmake
+/home/kavia/workspace/code-generation/rbus-10000000330/build-issue435/cjson-user-install/lib/cmake/cJSON/cJSONConfigVersion.cmake

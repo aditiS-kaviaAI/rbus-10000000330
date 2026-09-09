@@ -1,0 +1,10 @@
+prefix=/home/kavia/workspace/code-generation/rbus-10000000330/build-issue435/cjson-user-install
+exec_prefix=/home/kavia/workspace/code-generation/rbus-10000000330/build-issue435/cjson-user-install
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: MessagePack
+Description: Binary-based efficient object serialization library
+Version: 6.1.0
+Libs: -L${libdir} -lmsgpack-c
+Cflags: -I${includedir}

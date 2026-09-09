@@ -300,7 +300,7 @@ char* rbusValue_ToString(rbusValue_t v, char* buf, size_t buflen)
             n = snprintf(p, 0, "%.*f", DBL_DIG, v->d.f64)+1;
             break;
         case RBUS_DATETIME:
-            n = snprintf(p, 0, "0000-00-00T00:00:00+00:00") + 1;
+            n = snprintf(p, 0, "0000-00-00T00:00:00.000000+00:00") + 1;
             break;
         default:
             n = snprintf(p, 0, "FIXME TYPE %d", v->type)+1;
@@ -373,24 +373,36 @@ char* rbusValue_ToString(rbusValue_t v, char* buf, size_t buflen)
                 snprintf(tmpBuff, 40, "Z");
             }
             if(0 == v->d.tv.m_time.tm_year) {
-                snprintf(p, n, "%04d-%02d-%02dT%02d:%02d:%02d%s", v->d.tv.m_time.tm_year,
-                                                                    v->d.tv.m_time.tm_mon,
-                                                                    v->d.tv.m_time.tm_mday,
-                                                                    v->d.tv.m_time.tm_hour,
-                                                                    v->d.tv.m_time.tm_min,
-                                                                    v->d.tv.m_time.tm_sec,
-                                                                    tmpBuff);
+                if(v->d.tv.m_usec) {
+                    snprintf(p, n, "%04d-%02d-%02dT%02d:%02d:%02d.%06d%s",
+                        v->d.tv.m_time.tm_year, v->d.tv.m_time.tm_mon,
+                        v->d.tv.m_time.tm_mday, v->d.tv.m_time.tm_hour,
+                        v->d.tv.m_time.tm_min, v->d.tv.m_time.tm_sec,
+                        v->d.tv.m_usec, tmpBuff);
+                } else {
+                    snprintf(p, n, "%04d-%02d-%02dT%02d:%02d:%02d%s",
+                        v->d.tv.m_time.tm_year, v->d.tv.m_time.tm_mon,
+                        v->d.tv.m_time.tm_mday, v->d.tv.m_time.tm_hour,
+                        v->d.tv.m_time.tm_min, v->d.tv.m_time.tm_sec,
+                        tmpBuff);
+                }
             } else {
                 /* tm_mon represents month from 0 to 11. So increment tm_mon by 1.
                    tm_year represents years since 1900. So add 1900 to tm_year.
                  */
-                snprintf(p, n, "%04d-%02d-%02dT%02d:%02d:%02d%s", v->d.tv.m_time.tm_year+1900,
-                                                                    v->d.tv.m_time.tm_mon+1,
-                                                                    v->d.tv.m_time.tm_mday,
-                                                                    v->d.tv.m_time.tm_hour,
-                                                                    v->d.tv.m_time.tm_min,
-                                                                    v->d.tv.m_time.tm_sec,
-                                                                    tmpBuff);
+                if(v->d.tv.m_usec) {
+                    snprintf(p, n, "%04d-%02d-%02dT%02d:%02d:%02d.%06d%s",
+                        v->d.tv.m_time.tm_year + 1900, v->d.tv.m_time.tm_mon + 1,
+                        v->d.tv.m_time.tm_mday, v->d.tv.m_time.tm_hour,
+                        v->d.tv.m_time.tm_min, v->d.tv.m_time.tm_sec,
+                        v->d.tv.m_usec, tmpBuff);
+                } else {
+                    snprintf(p, n, "%04d-%02d-%02dT%02d:%02d:%02d%s",
+                        v->d.tv.m_time.tm_year + 1900, v->d.tv.m_time.tm_mon + 1,
+                        v->d.tv.m_time.tm_mday, v->d.tv.m_time.tm_hour,
+                        v->d.tv.m_time.tm_min, v->d.tv.m_time.tm_sec,
+                        tmpBuff);
+                }
             }
             break;
         }
@@ -789,7 +801,7 @@ int rbusValue_Decode(rbusValue_t* value, rbusBuffer_t const buff)
         rc = rbusBuffer_ReadDouble(buff, &current->d.f64);
         break;
     case RBUS_DATETIME:
-        rc = rbusBuffer_ReadDateTime(buff, &current->d.tv);
+        rc = rbusBuffer_ReadDateTime(buff, &current->d.tv, length);
         break;
     default:
         rbusValue_Release(*value);
@@ -953,7 +965,7 @@ int rbusValue_Compare(rbusValue_t v1, rbusValue_t v2)
     }
     case RBUS_DATETIME:
     {
-        if(memcmp(rbusValue_GetTime(v1), rbusValue_GetTime(v2), sizeof(rbusDateTime_t)))
+        if(memcmp(rbusValue_GetTime(v1), rbusValue_GetTime(v2), sizeof(rbusDateTime_t)) == 0)
             return 0;
 
         /*apply timezone and diff the times*/
@@ -982,12 +994,16 @@ int rbusValue_Compare(rbusValue_t v1, rbusValue_t v2)
         time_t t2 = mktime(&t2m);
         double diffSecs = difftime(t1, t2);
 
-        if(diffSecs == 0)
-            return 0;
-        else if(diffSecs < 0)
+        if(diffSecs < 0)
             return -1;
-        else
+        if(diffSecs > 0)
             return 1;
+
+        if(dt1.m_usec < dt2.m_usec)
+            return -1;
+        if(dt1.m_usec > dt2.m_usec)
+            return 1;
+        return 0;
     }
     case RBUS_PROPERTY:
     {
@@ -1224,8 +1240,8 @@ bool rbusValue_SetFromString(rbusValue_t value, rbusValueType_t type, const char
         }
     case RBUS_DATETIME:
         {
-            struct tm tv;
-            rbusDateTime_t tvm = {{0},{0}};
+            struct tm tv = {0};
+            rbusDateTime_t tvm = {{0},{0},0};
             if(0 != strncmp(pStringInput,"0000-",5)) {
                 char *pRet = NULL;
                 if(strstr(pStringInput,"T"))
@@ -1237,14 +1253,37 @@ bool rbusValue_SetFromString(rbusValue_t value, rbusValueType_t type, const char
                     return false;
                 }
                 rbusValue_MarshallTMtoRBUS(&tvm, &tv);
-                if((RBUS_TIMEZONE_LEN == strlen(pRet)) &&
-                        (isdigit((int)pRet[1]) &&
-                         isdigit((int)pRet[2]) &&
-                         isdigit((int)pRet[4]) &&
-                         isdigit((int)pRet[5]))
-                  ) {
+
+                if(*pRet == '.') {
+                    int digits = 0;
+                    pRet++;
+                    while(isdigit((unsigned char)*pRet) && digits < 6) {
+                        tvm.m_usec = (tvm.m_usec * 10) + (*pRet - '0');
+                        pRet++;
+                        digits++;
+                    }
+                    if(digits == 0 || isdigit((unsigned char)*pRet)) {
+                        RBUSLOG_INFO ("Invalid datetime fractional seconds");
+                        return false;
+                    }
+                    while(digits++ < 6)
+                        tvm.m_usec *= 10;
+                }
+
+                if(*pRet == 'Z' && pRet[1] == '\0') {
+                    /* UTC is represented by the initialized zero timezone. */
+                } else if((RBUS_TIMEZONE_LEN == strlen(pRet)) &&
+                          (pRet[0] == '+' || pRet[0] == '-') &&
+                          isdigit((unsigned char)pRet[1]) &&
+                          isdigit((unsigned char)pRet[2]) &&
+                          pRet[3] == ':' &&
+                          isdigit((unsigned char)pRet[4]) &&
+                          isdigit((unsigned char)pRet[5])) {
                     tvm.m_tz.m_isWest = ('-' == pRet[0]);
                     sscanf(pRet+1,"%02d:%02d",&(tvm.m_tz.m_tzhour), &(tvm.m_tz.m_tzmin));
+                } else {
+                    RBUSLOG_INFO ("Invalid datetime timezone");
+                    return false;
                 }
             }
             rbusValue_SetTime(value, &tvm);

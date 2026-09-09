@@ -105,6 +105,11 @@ struct tm32
 typedef struct _rbusDateTime {
     struct tm32       m_time;
     rbusTimeZone_t  m_tz;
+    /**
+     * Microseconds within the second, in the inclusive range 0 through
+     * 999999. A value of zero preserves the legacy second-resolution form.
+     */
+    int32_t          m_usec;
 } rbusDateTime_t;
 
 /**
@@ -216,6 +221,11 @@ void rbusValue_Copy(rbusValue_t dest, rbusValue_t source);
  *          YYYY-MM-DDThh:mm:ssZ
  *          YYYY-MM-DDThh:mm:ss+00:00
  *          YYYY-MM-DDThh:mm:ss-00:00
+ *          YYYY-MM-DDThh:mm:ss.ffffffZ
+ *          YYYY-MM-DDThh:mm:ss.ffffff+00:00
+ *          YYYY-MM-DDThh:mm:ss.ffffff-00:00
+ *          The fractional component is emitted as six digits when the
+ *          DateTime microsecond value is non-zero.
  *  @param value the value to convert to a string
  *  @param buf optional buffer to write the string to
  *  @param buflen the length of buf if buf was supplied, otherwise ignored

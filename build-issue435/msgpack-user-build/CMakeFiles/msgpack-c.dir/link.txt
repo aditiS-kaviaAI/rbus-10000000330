@@ -1,0 +1,1 @@
+/usr/bin/cc -fPIC -O3 -DNDEBUG -shared -Wl,-soname,libmsgpack-c.so.2 -o libmsgpack-c.so.2.0.0 "CMakeFiles/msgpack-c.dir/src/objectc.c.o" "CMakeFiles/msgpack-c.dir/src/unpack.c.o" "CMakeFiles/msgpack-c.dir/src/version.c.o" "CMakeFiles/msgpack-c.dir/src/vrefbuffer.c.o" "CMakeFiles/msgpack-c.dir/src/zone.c.o" 

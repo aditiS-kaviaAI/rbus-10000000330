@@ -1432,10 +1432,12 @@ int _event_callback_handler (char const* objectName, char const* eventName, rbus
 static int _master_event_callback_handler(char const* sender, char const* eventName, rbusMessage message, void* userData)
 {
     rbusEvent_t event = {0};
+    rbusEventSubscription_t callbackSubscription = {0};
     rbusFilter_t filter = NULL;
     int32_t componentId = -1;
     rbusEventSubscriptionInternal_t* subInternal = NULL;
     struct _rbusHandle* handleInfo = NULL;
+    rbusEventHandler_t handler = NULL;
     uint32_t interval = 0;
     uint32_t duration = 0;
     bool duration_complete = false;
@@ -1479,11 +1481,39 @@ static int _master_event_callback_handler(char const* sender, char const* eventN
             rtVector_RemoveItem(handleInfo->eventSubs, subInternal, NULL);
             duration_complete = true;
         }
-        ((rbusEventHandler_t)subInternal->sub->handler)(subInternal->sub->handle, &event, subInternal->sub);
+
+        /*
+         * Callback code may synchronously subscribe or unsubscribe using this
+         * handle.  Snapshot the callback-visible subscription fields before
+         * dropping the mutex so that a nested unsubscribe cannot free the
+         * original subscription while its callback is running.
+         */
+        callbackSubscription = *subInternal->sub;
+        callbackSubscription.eventName = strdup(subInternal->sub->eventName);
+        if(callbackSubscription.filter)
+            rbusFilter_Retain(callbackSubscription.filter);
+        handler = (rbusEventHandler_t)callbackSubscription.handler;
+
         if(duration_complete)
         {
             rbusEventSubscriptionInternal_free(subInternal);
         }
+
+        HANDLE_EVENTSUBS_MUTEX_UNLOCK(handleInfo);
+
+        /*
+         * Never invoke consumer-owned code while holding handle_eventSubsMutex:
+         * handlers are permitted to re-enter event subscription APIs.
+         */
+        (*handler)(callbackSubscription.handle, &event, &callbackSubscription);
+
+        free((void*)callbackSubscription.eventName);
+        if(callbackSubscription.filter)
+            rbusFilter_Release(callbackSubscription.filter);
+
+        rbusObject_Release(event.data);
+        rbusFilter_Release(filter);
+        return RBUSCORE_SUCCESS;
     }
     else
     {
@@ -5447,38 +5477,19 @@ rbusError_t rbusEvent_Unsubscribe(
 
     if(subInternal)
     {
-        rbusMessage payload = rbusEvent_CreateSubscribePayload(subInternal->sub, handleInfo->componentId);
+        rbusError_t errorcode = _rbus_event_unsubscribe(handle, subInternal);
 
-        rbusCoreError_t coreerr = rbus_unsubscribeFromEvent(NULL, eventName, payload, subInternal->rawData);
-
-        if(payload)
+        /*
+         * The helper detaches completed subscriptions from eventSubs. Keep a
+         * dirty subscription only while its provider is unavailable so that
+         * existing retry behavior is preserved.
+         */
+        if(errorcode != RBUS_ERROR_DESTINATION_NOT_FOUND)
         {
-            rbusMessage_Release(payload);
+            rbusEventSubscriptionInternal_free(subInternal);
         }
-
-
-        if(coreerr == RBUSCORE_SUCCESS)
-        {
-            rtVector_RemoveItem(handleInfo->eventSubs, subInternal, rbusEventSubscriptionInternal_free);
-            HANDLE_EVENTSUBS_MUTEX_UNLOCK(handle);
-            return RBUS_ERROR_SUCCESS;
-        }
-        else
-        {
-            if(coreerr == RBUSCORE_ERROR_ENTRY_NOT_FOUND)
-            {
-                subInternal->dirty = true;
-                RBUSLOG_ERROR ("%s unsubscription failed because no provider could be found"
-                        "and subscriber marked as dirty", subInternal->sub->eventName);
-            }
-            else
-            {
-                RBUSLOG_ERROR("%s failed with core err=%d", eventName, coreerr);
-                rtVector_RemoveItem(handleInfo->eventSubs, subInternal, rbusEventSubscriptionInternal_free);
-                HANDLE_EVENTSUBS_MUTEX_UNLOCK(handle);
-                return RBUS_ERROR_BUS_ERROR;
-            }
-        }
+        HANDLE_EVENTSUBS_MUTEX_UNLOCK(handle);
+        return errorcode;
     }
     else
     {
@@ -5486,8 +5497,6 @@ rbusError_t rbusEvent_Unsubscribe(
         HANDLE_EVENTSUBS_MUTEX_UNLOCK(handle);
         return RBUS_ERROR_INVALID_OPERATION; //TODO - is the the right error to return
     }
-    HANDLE_EVENTSUBS_MUTEX_UNLOCK(handle);
-    return RBUS_ERROR_SUCCESS;
 }
 
 rbusError_t rbusEvent_UnsubscribeRawData(

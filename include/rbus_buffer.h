@@ -90,7 +90,7 @@ int rbusBuffer_ReadUInt64(rbusBuffer_t const buff, uint64_t* u64);
 int rbusBuffer_ReadSingle(rbusBuffer_t const buff, float* f32);
 int rbusBuffer_ReadDouble(rbusBuffer_t const buff, double* f64);
 int rbusBuffer_ReadString(rbusBuffer_t const buff, char** s, int* len);/* caller must free *s */
-int rbusBuffer_ReadDateTime(rbusBuffer_t const buff, rbusDateTime_t* tv);
+int rbusBuffer_ReadDateTime(rbusBuffer_t const buff, rbusDateTime_t* tv, uint16_t length);
 int rbusBuffer_ReadBytes(rbusBuffer_t const buff, uint8_t** bytes, int* len);/* caller must free *bytes */
 
 #ifdef __cplusplus

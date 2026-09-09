@@ -1,0 +1,10 @@
+libdir=/home/kavia/workspace/code-generation/rbus-10000000330/build-issue435/cjson-user-install/lib
+includedir=/home/kavia/workspace/code-generation/rbus-10000000330/build-issue435/cjson-user-install/include
+
+Name: libcjson
+Version: 1.7.18
+Description: Ultralightweight JSON parser in ANSI C
+URL: https://github.com/DaveGamble/cJSON
+Libs: -L${libdir} -lcjson
+Libs.private: -lm
+Cflags: -I${includedir} -I${includedir}/cjson

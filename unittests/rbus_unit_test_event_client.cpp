@@ -24,8 +24,11 @@ Test Case : Testing rbus communications from client end
 #include <unistd.h>
 #include <string.h>
 #include <stdbool.h>
+#include <condition_variable>
+#include <mutex>
 extern "C" {
 #include "rbuscore.h"
+#include "rbus.h"
 
 }
 #include "gtest_app.h"
@@ -129,6 +132,126 @@ static int event_callback(const char * object_name,  const char * event_name, rb
     printf("dumpMessage: %.*s\n", buff_length, buff);
     free(buff);
     return 0;
+}
+
+namespace
+{
+const char* const kReentryEventName = "Device.RbusRegression.CallbackReentry";
+const char* const kMissingEventName = "Device.RbusRegression.MissingEvent";
+const char* const kSubscriptionUserData = "callback-subscription-user-data";
+
+struct CallbackReentryState
+{
+    std::condition_variable completed;
+    std::mutex mutex;
+    bool callbackCompleted = false;
+    bool snapshotIsValid = false;
+    rbusError_t nestedSubscribeResult = RBUS_ERROR_BUS_ERROR;
+    rbusError_t nestedUnsubscribeResult = RBUS_ERROR_BUS_ERROR;
+};
+
+rbusError_t callbackReentryEventSubHandler(
+    rbusHandle_t handle,
+    rbusEventSubAction_t action,
+    char const* eventName,
+    rbusFilter_t filter,
+    int32_t interval,
+    bool* autoPublish)
+{
+    (void)handle;
+    (void)action;
+    (void)eventName;
+    (void)filter;
+    (void)interval;
+
+    *autoPublish = false;
+    return RBUS_ERROR_SUCCESS;
+}
+
+void callbackReentryHandler(
+    rbusHandle_t handle,
+    rbusEvent_t const* event,
+    rbusEventSubscription_t* subscription)
+{
+    CallbackReentryState* state =
+        static_cast<CallbackReentryState*>(subscription->userData);
+
+    state->nestedSubscribeResult = rbusEvent_Subscribe(
+        handle,
+        kMissingEventName,
+        callbackReentryHandler,
+        state,
+        0);
+    state->nestedUnsubscribeResult = rbusEvent_Unsubscribe(handle, event->name);
+
+    /*
+     * The source subscription has been removed above. These reads must remain
+     * valid because the dispatcher supplies a callback-local subscription copy.
+     */
+    state->snapshotIsValid =
+        strcmp(subscription->eventName, kReentryEventName) == 0 &&
+        subscription->userData == state &&
+        event->name != NULL &&
+        strcmp(event->name, kReentryEventName) == 0;
+
+    {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->callbackCompleted = true;
+    }
+    state->completed.notify_one();
+}
+} // namespace
+
+TEST(RbusEventCallbackReentry, SubscribeAndUnsubscribeOnSameHandleDoNotDeadlock)
+{
+    rbusHandle_t provider = NULL;
+    rbusHandle_t consumer = NULL;
+    CallbackReentryState state;
+    rbusDataElement_t eventElement = {};
+    rbusEvent_t event = {};
+
+    ASSERT_EQ(rbus_open(&provider, "rbus_callback_reentry_provider"),
+        RBUS_ERROR_SUCCESS);
+
+    eventElement.name = const_cast<char*>(kReentryEventName);
+    eventElement.type = RBUS_ELEMENT_TYPE_EVENT;
+    eventElement.cbTable.eventSubHandler = callbackReentryEventSubHandler;
+    ASSERT_EQ(rbus_regDataElements(provider, 1, &eventElement),
+        RBUS_ERROR_SUCCESS);
+
+    ASSERT_EQ(rbus_open(&consumer, "rbus_callback_reentry_consumer"),
+        RBUS_ERROR_SUCCESS);
+    ASSERT_EQ(rbusEvent_Subscribe(
+        consumer,
+        kReentryEventName,
+        callbackReentryHandler,
+        &state,
+        0),
+        RBUS_ERROR_SUCCESS);
+
+    event.name = kReentryEventName;
+    event.type = RBUS_EVENT_GENERAL;
+    event.data = NULL;
+    ASSERT_EQ(rbusEvent_Publish(provider, &event), RBUS_ERROR_SUCCESS);
+
+    {
+        std::unique_lock<std::mutex> lock(state.mutex);
+        ASSERT_TRUE(state.completed.wait_for(
+            lock,
+            std::chrono::seconds(5),
+            [&state] { return state.callbackCompleted; }))
+            << "event callback did not complete; callback re-entry may be deadlocked";
+    }
+
+    EXPECT_EQ(state.nestedUnsubscribeResult, RBUS_ERROR_SUCCESS);
+    // Missing providers exhaust the Subscribe retry window and return a timeout.
+    EXPECT_EQ(state.nestedSubscribeResult, RBUS_ERROR_TIMEOUT);
+    EXPECT_TRUE(state.snapshotIsValid);
+
+    EXPECT_EQ(rbus_unregDataElements(provider, 1, &eventElement),
+        RBUS_ERROR_SUCCESS);
+    EXPECT_EQ(rbus_close(consumer), RBUS_ERROR_SUCCESS);
+    EXPECT_EQ(rbus_close(provider), RBUS_ERROR_SUCCESS);
 }
 
 TEST_F(EventClientAPIs, sample_test)
