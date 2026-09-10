@@ -39,6 +39,7 @@
 #include "rbus_log.h"
 #include "rbus_handle.h"
 #include "rbus_message.h"
+#include "rbus_diagnostics_client.h"
 
 //******************************* MACROS *****************************************//
 #define UNUSED1(a)              (void)(a)
@@ -3489,6 +3490,7 @@ rbusError_t rbus_get(rbusHandle_t handle, char const* name, rbusValue_t* value)
 {
     rbusError_t errorcode = RBUS_ERROR_SUCCESS;
     rbusCoreError_t err = RBUSCORE_SUCCESS;
+    uint64_t diagnosticsStartUs;
     VERIFY_HANDLE(handle);
     rbusMessage request, response;
     int ret = -1;
@@ -3512,6 +3514,7 @@ rbusError_t rbus_get(rbusHandle_t handle, char const* name, rbusValue_t* value)
         return RBUS_ERROR_ACCESS_NOT_ALLOWED;
     }
 
+    diagnosticsStartUs = rbusDiagnostics_MonotonicTimeUs();
     rbusMessage_Init(&request);
     /* Set the Component name that invokes the set */
     rbusMessage_SetString(request, handleInfo->componentName);
@@ -3579,6 +3582,12 @@ rbusError_t rbus_get(rbusHandle_t handle, char const* name, rbusValue_t* value)
         }
         rbusMessage_Release(response);
     }
+    rbusDiagnostics_RecordOperation(
+        RBUS_DIAGNOSTICS_OPERATION_GET,
+        handleInfo->componentName,
+        name,
+        rbusDiagnostics_MonotonicTimeUs() - diagnosticsStartUs,
+        errorcode);
     return errorcode;
 }
 
@@ -3993,6 +4002,7 @@ rbusError_t _setInternal(rbusHandle_t handle, char const* name, rbusValue_t valu
 {
     rbusError_t errorcode = RBUS_ERROR_INVALID_INPUT;
     rbusCoreError_t err = RBUSCORE_SUCCESS;
+    uint64_t diagnosticsStartUs;
     VERIFY_HANDLE(handle);
     rbusMessage setRequest, setResponse;
     struct _rbusHandle* handleInfo = (struct _rbusHandle*) handle;
@@ -4014,6 +4024,7 @@ rbusError_t _setInternal(rbusHandle_t handle, char const* name, rbusValue_t valu
     {
         return errorcode;
     }
+    diagnosticsStartUs = rbusDiagnostics_MonotonicTimeUs();
     rbusMessage_Init(&setRequest);
     /* Set the Session ID first */
     if ((opts) && (opts->sessionId != 0))
@@ -4075,6 +4086,12 @@ rbusError_t _setInternal(rbusHandle_t handle, char const* name, rbusValue_t valu
         /* Release the reponse message */
         rbusMessage_Release(setResponse);
     }
+    rbusDiagnostics_RecordOperation(
+        RBUS_DIAGNOSTICS_OPERATION_SET,
+        handleInfo->componentName,
+        name,
+        rbusDiagnostics_MonotonicTimeUs() - diagnosticsStartUs,
+        errorcode);
     return errorcode;
 }
 
@@ -6093,12 +6110,14 @@ rbusError_t rbusMethod_InvokeInternal(
     rbusLegacyReturn_t legacyRetCode = RBUS_LEGACY_ERR_FAILURE;
     rbusValue_t value1 = NULL, value2 = NULL;
     struct _rbusHandle* handleInfo = (struct _rbusHandle*) handle;
+    uint64_t diagnosticsStartUs;
 
     VERIFY_NULL(handle);
     VERIFY_NULL(methodName);
     VERIFY_NULL(outParams);
 
     RBUSLOG_DEBUG("Method_InvokeInternal: %s", methodName);
+    diagnosticsStartUs = rbusDiagnostics_MonotonicTimeUs();
 
     rbusMessage_Init(&request);
     rbusMessage_SetInt32(request, 0);/*TODO: this should be the session ID*/
@@ -6139,7 +6158,14 @@ rbusError_t rbusMethod_InvokeInternal(
         rbusObject_SetValue(*outParams, "error_string", value2);
         rbusValue_Release(value1);
         rbusValue_Release(value2);
-        return rbusCoreError_to_rbusError(err);
+        returnCode = rbusCoreError_to_rbusError(err);
+        rbusDiagnostics_RecordOperation(
+            RBUS_DIAGNOSTICS_OPERATION_METHOD,
+            handleInfo->componentName,
+            methodName,
+            rbusDiagnostics_MonotonicTimeUs() - diagnosticsStartUs,
+            returnCode);
+        return returnCode;
     }
 
     rbusMessage_GetInt32(response, &returnCode);
@@ -6155,6 +6181,12 @@ rbusError_t rbusMethod_InvokeInternal(
 
     RBUSLOG_DEBUG("Method_InvokeInternal success response with returnCode:%d", returnCode);
 
+    rbusDiagnostics_RecordOperation(
+        RBUS_DIAGNOSTICS_OPERATION_METHOD,
+        handleInfo->componentName,
+        methodName,
+        rbusDiagnostics_MonotonicTimeUs() - diagnosticsStartUs,
+        returnCode);
     return returnCode;
 }
 
@@ -6536,8 +6568,16 @@ rbusError_t rbusHandle_GetTraceContextAsString(
     if (!rbus)
       return RBUS_ERROR_INVALID_HANDLE;
 
-    if ((traceParent && traceParentLength <= 0) ||(traceState && traceStateLength <= 0))
-      return RBUS_ERROR_INVALID_INPUT;
+    /*
+     * A destination supplied by the caller must have room for at least its
+     * terminator. This prevents negative or zero lengths from underflowing
+     * the bounded-copy calculation below.
+     */
+    if ((traceParent != NULL && traceParentLength <= 0)
+        || (traceState != NULL && traceStateLength <= 0))
+    {
+        return RBUS_ERROR_INVALID_INPUT;
+    }
 
     size_t n;
     char const *s = NULL;
@@ -6547,10 +6587,11 @@ rbusError_t rbusHandle_GetTraceContextAsString(
 
     if (traceParent)
     {
-        if (s && traceParentLength > 0)
+        if (s)
         {
-            n = RBUS_MIN(strlen(s), (size_t) (traceParentLength - 1));
-            rtString_Copy(traceParent, s, n + 1);
+            n = RBUS_MIN( (int) strlen(s), traceParentLength - 1 );
+            rtString_Copy(traceParent, s, n);
+            traceParent[n] ='\0';
         }
         else
             traceParent[0] = '\0';
@@ -6558,10 +6599,11 @@ rbusError_t rbusHandle_GetTraceContextAsString(
 
     if (traceState)
     {
-        if (t && traceStateLength > 0)
+        if (t)
         {
-            n = RBUS_MIN(strlen(t), (size_t) (traceStateLength - 1));
-            rtString_Copy(traceState, t, n + 1);
+            n = RBUS_MIN( (int) strlen(t), traceStateLength - 1);
+            rtString_Copy(traceState, t, n);
+            traceState[n] = '\0';
         }
         else
             traceState[0] = '\0';

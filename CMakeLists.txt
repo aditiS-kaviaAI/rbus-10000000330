@@ -73,7 +73,7 @@ configure_package_config_file(rbusConfig.cmake.in
 
 write_basic_package_version_file(
   rbusConfigVersion.cmake
-  VERSION 1.1.1
+  VERSION ${PROJECT_VERSION}
   COMPATIBILITY AnyNewerVersion )
 
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rbusConfig.cmake"
@@ -91,11 +91,17 @@ option(BUILD_RTMESSAGE_DATAPROVIDER_LIB "BUILD_RTMESSAGE_DATAPROVIDER_LIB" OFF)
 option(BUILD_RBUSCORE_BENCHMARK_TEST "BUILD_RBUSCORE_BENCHMARK_TEST" OFF)
 option(BUILD_RBUSCORE_TEST_APPS "BUILD_RBUSCORE_TEST_APPS" OFF)
 option(BUILD_SESSIONMGR_SAMPLE_APPS "BUILD_SESSIONMGR_SAMPLE_APPS" OFF)
+option(BUILD_RBUS_DIAGNOSTICS "Build the local RBus diagnostics reporter and publisher support" OFF)
 
 option(ENABLE_RDKLOGGER "ENABLE_RDKLOGGER" OFF)
 option(RDKC_BUILD "RDKC_BUILD" OFF)
 option(WITH_SPAKE2 "WITH_SPAKE2" OFF)
 option(MSG_ROUNDTRIP_TIME "MSG_ROUNDTRIP_TIME" OFF)
+
+set(RBUS_DIAGNOSTICS_OBSERVATION_SOCKET "/tmp/rbus-diagnostics-observations.sock"
+    CACHE STRING "Unix datagram socket used for best-effort RBus observations")
+set(RBUS_DIAGNOSTICS_CONTROL_SOCKET "/tmp/rbus-diagnostics-control.sock"
+    CACHE STRING "Unix stream socket used by the RBusDiagnostics plugin")
 
 
 if (BUILD_FOR_DESKTOP)

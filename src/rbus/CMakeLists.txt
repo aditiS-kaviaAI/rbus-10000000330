@@ -40,11 +40,18 @@ add_library(
     rbus_subscriptions.c
     rbus_tokenchain.c
     rbus_asyncsubscribe.c
-    rbus_intervalsubscription.c)
+    rbus_intervalsubscription.c
+    rbus_diagnostics_client.c)
 
 target_link_libraries(rbus rbuscore rtMessage -fPIC -pthread)
 
 target_include_directories (rbus PUBLIC ${RDKLOGGER_INCLUDE_DIRS})
+
+if (BUILD_RBUS_DIAGNOSTICS)
+  target_compile_definitions(rbus PRIVATE
+    RBUS_DIAGNOSTICS_ENABLED
+    RBUS_DIAGNOSTICS_OBSERVATION_SOCKET="${RBUS_DIAGNOSTICS_OBSERVATION_SOCKET}")
+endif ()
 
 set_target_properties(rbus
     PROPERTIES SOVERSION "0"
