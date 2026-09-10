@@ -1,0 +1,43 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/home/kavia/workspace/code-generation/rbus-10000000330/build-github-446/CMakeFiles/linenoise"
+		},
+		{
+			"file" : "/home/kavia/workspace/code-generation/rbus-10000000330/build-github-446/CMakeFiles/linenoise.rule"
+		},
+		{
+			"file" : "/home/kavia/workspace/code-generation/rbus-10000000330/build-github-446/CMakeFiles/linenoise-complete.rule"
+		},
+		{
+			"file" : "/home/kavia/workspace/code-generation/rbus-10000000330/build-github-446/deps/src/linenoise-stamp/linenoise-build.rule"
+		},
+		{
+			"file" : "/home/kavia/workspace/code-generation/rbus-10000000330/build-github-446/deps/src/linenoise-stamp/linenoise-configure.rule"
+		},
+		{
+			"file" : "/home/kavia/workspace/code-generation/rbus-10000000330/build-github-446/deps/src/linenoise-stamp/linenoise-download.rule"
+		},
+		{
+			"file" : "/home/kavia/workspace/code-generation/rbus-10000000330/build-github-446/deps/src/linenoise-stamp/linenoise-install.rule"
+		},
+		{
+			"file" : "/home/kavia/workspace/code-generation/rbus-10000000330/build-github-446/deps/src/linenoise-stamp/linenoise-mkdir.rule"
+		},
+		{
+			"file" : "/home/kavia/workspace/code-generation/rbus-10000000330/build-github-446/deps/src/linenoise-stamp/linenoise-patch_disconnected.rule"
+		},
+		{
+			"file" : "/home/kavia/workspace/code-generation/rbus-10000000330/build-github-446/deps/src/linenoise-stamp/linenoise-update_disconnected.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"linenoise"
+		],
+		"name" : "linenoise"
+	}
+}

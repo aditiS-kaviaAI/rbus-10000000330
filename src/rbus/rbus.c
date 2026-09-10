@@ -1436,6 +1436,8 @@ static int _master_event_callback_handler(char const* sender, char const* eventN
     int32_t componentId = -1;
     rbusEventSubscriptionInternal_t* subInternal = NULL;
     struct _rbusHandle* handleInfo = NULL;
+    rbusEventSubscription_t callbackSubscription = {0};
+    rbusEventHandler_t callbackHandler = NULL;
     uint32_t interval = 0;
     uint32_t duration = 0;
     bool duration_complete = false;
@@ -1479,11 +1481,43 @@ static int _master_event_callback_handler(char const* sender, char const* eventN
             rtVector_RemoveItem(handleInfo->eventSubs, subInternal, NULL);
             duration_complete = true;
         }
-        ((rbusEventHandler_t)subInternal->sub->handler)(subInternal->sub->handle, &event, subInternal->sub);
+
+        /*
+         * A handler may unsubscribe this exact subscription.  Snapshot the
+         * callback-visible fields before releasing the mutex so that nested
+         * unsubscribe can safely free the original vector-owned subscription.
+         */
+        callbackSubscription = *subInternal->sub;
+        callbackSubscription.eventName = strdup(subInternal->sub->eventName);
+        if(!callbackSubscription.eventName)
+        {
+            if(duration_complete)
+            {
+                rbusEventSubscriptionInternal_free(subInternal);
+            }
+            HANDLE_EVENTSUBS_MUTEX_UNLOCK(handleInfo);
+            errorcode = RBUS_ERROR_OUT_OF_RESOURCES;
+            goto exit_1;
+        }
+        if(callbackSubscription.filter)
+        {
+            rbusFilter_Retain(callbackSubscription.filter);
+        }
+        callbackHandler = (rbusEventHandler_t)callbackSubscription.handler;
+
+        HANDLE_EVENTSUBS_MUTEX_UNLOCK(handleInfo);
+        callbackHandler(callbackSubscription.handle, &event, &callbackSubscription);
+
+        if(callbackSubscription.filter)
+        {
+            rbusFilter_Release(callbackSubscription.filter);
+        }
+        free((void*)callbackSubscription.eventName);
         if(duration_complete)
         {
             rbusEventSubscriptionInternal_free(subInternal);
         }
+        goto exit_1;
     }
     else
     {
@@ -1499,7 +1533,8 @@ exit_1:
     rbusObject_Release(event.data);
     rbusFilter_Release(filter);
 
-    HANDLE_EVENTSUBS_MUTEX_UNLOCK(handleInfo);
+    if(errorcode != RBUS_ERROR_SUCCESS)
+        return RBUSCORE_ERROR_OUT_OF_RESOURCES;
     return RBUSCORE_SUCCESS;
 }
 

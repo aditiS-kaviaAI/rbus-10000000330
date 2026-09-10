@@ -1,0 +1,40 @@
+file(REMOVE_RECURSE
+  ".0"
+  "CMakeFiles/rbus.dir/rbus.c.o"
+  "CMakeFiles/rbus.dir/rbus.c.o.d"
+  "CMakeFiles/rbus.dir/rbus_asyncsubscribe.c.o"
+  "CMakeFiles/rbus.dir/rbus_asyncsubscribe.c.o.d"
+  "CMakeFiles/rbus.dir/rbus_buffer.c.o"
+  "CMakeFiles/rbus.dir/rbus_buffer.c.o.d"
+  "CMakeFiles/rbus.dir/rbus_element.c.o"
+  "CMakeFiles/rbus.dir/rbus_element.c.o.d"
+  "CMakeFiles/rbus.dir/rbus_filter.c.o"
+  "CMakeFiles/rbus.dir/rbus_filter.c.o.d"
+  "CMakeFiles/rbus.dir/rbus_handle.c.o"
+  "CMakeFiles/rbus.dir/rbus_handle.c.o.d"
+  "CMakeFiles/rbus.dir/rbus_intervalsubscription.c.o"
+  "CMakeFiles/rbus.dir/rbus_intervalsubscription.c.o.d"
+  "CMakeFiles/rbus.dir/rbus_message.c.o"
+  "CMakeFiles/rbus.dir/rbus_message.c.o.d"
+  "CMakeFiles/rbus.dir/rbus_object.c.o"
+  "CMakeFiles/rbus.dir/rbus_object.c.o.d"
+  "CMakeFiles/rbus.dir/rbus_property.c.o"
+  "CMakeFiles/rbus.dir/rbus_property.c.o.d"
+  "CMakeFiles/rbus.dir/rbus_subscriptions.c.o"
+  "CMakeFiles/rbus.dir/rbus_subscriptions.c.o.d"
+  "CMakeFiles/rbus.dir/rbus_tokenchain.c.o"
+  "CMakeFiles/rbus.dir/rbus_tokenchain.c.o.d"
+  "CMakeFiles/rbus.dir/rbus_value.c.o"
+  "CMakeFiles/rbus.dir/rbus_value.c.o.d"
+  "CMakeFiles/rbus.dir/rbus_valuechange.c.o"
+  "CMakeFiles/rbus.dir/rbus_valuechange.c.o.d"
+  "librbus.pdb"
+  "librbus.so"
+  "librbus.so.0"
+  "librbus.so.2.14.0"
+)
+
+# Per-language clean rules from dependency scanning.
+foreach(lang C)
+  include(CMakeFiles/rbus.dir/cmake_clean_${lang}.cmake OPTIONAL)
+endforeach()

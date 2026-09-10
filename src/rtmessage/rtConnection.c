@@ -132,6 +132,8 @@ struct _rtConnection
   int                     check_remote_router;
 #endif
   pid_t                   read_tid;
+  pid_t                   callback_tid;
+  rtListItem              callback_dispatch_item;
 };
 
 typedef struct _rtMessageInfo
@@ -162,6 +164,7 @@ static int g_taint_packets = 0;
 static int rtConnection_StartThreads(rtConnection con);
 static int rtConnection_StopThreads(rtConnection con);
 static rtError rtConnection_Read(rtConnection con, int32_t timeout);
+static bool rtConnection_DispatchNestedCallbackMessage(rtConnection con);
 
 static inline bool rtConnection_IsSecure(rtConnection con)
 {
@@ -647,6 +650,8 @@ rtConnection_CreateInternal(rtConnection* con, char const* application_name, cha
   c->default_callback = NULL;
   c->run_threads = 0;
   c->read_tid = 0;
+  c->callback_tid = 0;
+  c->callback_dispatch_item = NULL;
   c->reconnect_in_progress = 0;
   rtTime_Now(&c->start_time);
 #ifdef WITH_SPAKE2
@@ -1050,6 +1055,13 @@ rtConnection_SendRequestInternal(rtConnection con, uint8_t const* pReq, uint32_t
     rtListItem listItem;
 
     pid_t tid = syscall(__NR_gettid);
+    /*
+     * pthread_create stores callback_thread before its entry point can
+     * receive work.  Use that authoritative pthread identity here instead
+     * of the callback thread's separately-written Linux thread ID, which
+     * has no synchronization with this request path.
+     */
+    bool in_callback_thread = pthread_equal(pthread_self(), con->callback_thread);
 
     pthread_mutex_lock(&con->mutex);
 #ifdef C11_ATOMICS_SUPPORTED
@@ -1072,11 +1084,62 @@ rtConnection_SendRequestInternal(rtConnection con, uint8_t const* pReq, uint32_t
     }
     pthread_mutex_unlock(&con->mutex);
 
-    if(tid != con->read_tid)
+    if(tid != con->read_tid && !in_callback_thread)
     {
       rtTime_t timeout_time;
       rtTime_Later(NULL, timeout, &timeout_time);
       ret = rtSemaphore_TimedWait(queue_entry.sem, &timeout_time); //TODO: handle wake triggered by signals
+    }
+    else if(in_callback_thread)
+    {
+      /*
+       * A callback can synchronously issue a request whose provider work is
+       * queued behind the active callback.  Keep socket reads on the reader
+       * thread, but dispatch later queue entries until the response arrives.
+       */
+      rtTime_t timeout_time;
+      rtTime_Later(NULL, timeout, &timeout_time);
+
+      while(RT_OK == ret)
+      {
+        int sem_value = 0;
+        rtSemaphore_GetValue(queue_entry.sem, &sem_value);
+        if(sem_value > 0)
+        {
+          ret = RT_OK;
+          break;
+        }
+
+        if(rtConnection_DispatchNestedCallbackMessage(con))
+        {
+          continue;
+        }
+
+        if(rtTime_Compare(NULL, &timeout_time) >= 0)
+        {
+          ret = RT_ERROR_TIMEOUT;
+          break;
+        }
+
+        /*
+         * Poll the response semaphore briefly so newly queued provider work
+         * is dispatched promptly, while never extending the original deadline.
+         */
+        rtTime_t now;
+        rtTime_t wait_time;
+        rtTime_Now(&now);
+        rtTime_Later(&now, 10, &wait_time);
+        if(rtTime_Compare(&wait_time, &timeout_time) > 0)
+        {
+          wait_time = timeout_time;
+        }
+
+        ret = rtSemaphore_TimedWait(queue_entry.sem, &wait_time);
+        if(ret == RT_ERROR_TIMEOUT)
+        {
+          ret = RT_OK;
+        }
+      }
     }
     else
     {
@@ -1838,9 +1901,74 @@ void check_router(rtConnection con)
   was blocked, it could not read the response message the SendRequest
   was waiting on.
 */
+static bool rtConnection_DispatchNestedCallbackMessage(rtConnection con)
+{
+  int i;
+  rtListItem listItem = NULL;
+  rtListItem active_item = NULL;
+  rtMessageInfo* msginfo = NULL;
+  rtMessageCallback callback = NULL;
+
+  /*
+   * The active callback remains at the front of the queue until it returns.
+   * Select only the next item so a nested request cannot recursively invoke
+   * the callback that initiated it.
+   */
+  pthread_mutex_lock(&con->callback_message_mutex);
+  active_item = con->callback_dispatch_item;
+  if(!active_item)
+  {
+    pthread_mutex_unlock(&con->callback_message_mutex);
+    return false;
+  }
+
+  rtListItem_GetNext(active_item, &listItem);
+  if(!listItem)
+  {
+    pthread_mutex_unlock(&con->callback_message_mutex);
+    return false;
+  }
+
+  rtListItem_GetData(listItem, (void**)&msginfo);
+  pthread_mutex_unlock(&con->callback_message_mutex);
+
+  pthread_mutex_lock(&con->mutex);
+  if(0 != con->run_threads)
+  {
+    for(i = 0; i < RTMSG_LISTENERS_MAX; ++i)
+    {
+      if(con->listeners[i].in_use &&
+          con->listeners[i].subscription_id == msginfo->header.control_data)
+      {
+        callback = con->listeners[i].callback;
+        msginfo->userData = con->listeners[i].closure;
+        break;
+      }
+    }
+  }
+  pthread_mutex_unlock(&con->mutex);
+
+  pthread_mutex_lock(&con->callback_message_mutex);
+  con->callback_dispatch_item = listItem;
+  pthread_mutex_unlock(&con->callback_message_mutex);
+  if(callback)
+  {
+    callback(&msginfo->header, msginfo->data, msginfo->dataLength,
+        msginfo->userData);
+  }
+  pthread_mutex_lock(&con->callback_message_mutex);
+  con->callback_dispatch_item = active_item;
+  rtList_RemoveItem(con->callback_message_list, listItem,
+      rtMessageInfo_ListItemFree);
+  pthread_mutex_unlock(&con->callback_message_mutex);
+
+  return true;
+}
+
 static void * rtConnection_CallbackThread(void *data)
 {
   rtConnection con = (rtConnection)data;
+  con->callback_tid = syscall(__NR_gettid);
   rtLog_Debug("Callback thread started");
 
   while (1 == GetRunThreadsSync(con))
@@ -1914,9 +2042,15 @@ static void * rtConnection_CallbackThread(void *data)
       /*process the message without locking any mutex*/
       if(callback)
       {
+          pthread_mutex_lock(&con->callback_message_mutex);
+          con->callback_dispatch_item = listItem;
+          pthread_mutex_unlock(&con->callback_message_mutex);
           //rtLog_Error("rtConnection_CallbackThread before callback");
           callback(&msginfo->header, msginfo->data, msginfo->dataLength, msginfo->userData);
           //rtLog_Error("rtConnection_CallbackThread after callback");
+          pthread_mutex_lock(&con->callback_message_mutex);
+          con->callback_dispatch_item = NULL;
+          pthread_mutex_unlock(&con->callback_message_mutex);
       }
       else
       {

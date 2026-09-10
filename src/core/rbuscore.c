@@ -512,6 +512,7 @@ static void dispatch_method_call(rbusMessage msg, const rtMessageHeader *hdr, se
 static void onMessage(rtMessageHeader const* hdr, uint8_t const* data, uint32_t dataLen, void* closure)
 {
     rbusMessage msg;
+    bool message_queued = false;
     rbusMessage_FromBytes(&msg, data, dataLen);
 
     /*using namespace rbus_server;*/
@@ -525,6 +526,11 @@ static void onMessage(rtMessageHeader const* hdr, uint8_t const* data, uint32_t 
         queued_request_t req;
         queued_request_create(&req, *hdr, msg, obj);
         rtVector_PushBack(g_queued_requests, req);
+        /*
+         * The queued request owns this reference until the outer dispatch can
+         * process it. Releasing it below would leave req->msg dangling.
+         */
+        message_queued = true;
     }
     else
         dispatch_method_call(msg, hdr, obj);
@@ -536,12 +542,14 @@ static void onMessage(rtMessageHeader const* hdr, uint8_t const* data, uint32_t 
         {
             queued_request_t req = rtVector_At(g_queued_requests, 0);
             dispatch_method_call(req->msg, &req->hdr, req->obj);
+            rbusMessage_Release(req->msg);
             rtVector_RemoveItem(g_queued_requests, req, rtVector_Cleanup_Free);
         }
     }
     stack_counter--;
 
-    rbusMessage_Release(msg);
+    if(!message_queued)
+        rbusMessage_Release(msg);
     return;
 }
 

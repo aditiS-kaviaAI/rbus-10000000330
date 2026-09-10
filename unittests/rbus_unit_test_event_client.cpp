@@ -26,9 +26,13 @@ Test Case : Testing rbus communications from client end
 #include <stdbool.h>
 extern "C" {
 #include "rbuscore.h"
+#include "rbus.h"
 
 }
 #include "gtest_app.h"
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
 
 #define DEFAULT_RESULT_BUFFERSIZE 128
 
@@ -129,6 +133,148 @@ static int event_callback(const char * object_name,  const char * event_name, rb
     printf("dumpMessage: %.*s\n", buff_length, buff);
     free(buff);
     return 0;
+}
+
+struct RbusEventCallbackReentryContext
+{
+    const char* eventName;
+    std::mutex mutex;
+    std::condition_variable callbackComplete;
+    bool callbackEntered;
+    bool callbackCompleted;
+    bool eventSnapshotValid;
+    bool subscriptionSnapshotValid;
+    bool absentAfterUnsubscribe;
+    bool presentAfterSubscribe;
+    rbusError_t unsubscribeError;
+    rbusError_t subscribeError;
+};
+
+/*
+ * The callback deliberately re-enters RBUS using the same consumer handle.
+ * Its recorded state is asserted by the test thread after a bounded wait so
+ * that a lock re-entry regression cannot pass merely because no event arrived.
+ */
+static void rbus_event_callback_reentry_handler(
+    rbusHandle_t handle,
+    rbusEvent_t const* event,
+    rbusEventSubscription_t* subscription)
+{
+    RbusEventCallbackReentryContext* context =
+        static_cast<RbusEventCallbackReentryContext*>(subscription ? subscription->userData : NULL);
+
+    if (context == NULL)
+        return;
+
+    {
+        std::lock_guard<std::mutex> lock(context->mutex);
+        context->callbackEntered = true;
+        context->eventSnapshotValid = event != NULL && event->name != NULL &&
+            strcmp(event->name, context->eventName) == 0;
+        /* Capture callback-owned subscription details before mutating it. */
+        context->subscriptionSnapshotValid = subscription->handle == handle &&
+            subscription->eventName != NULL &&
+            strcmp(subscription->eventName, context->eventName) == 0 &&
+            subscription->userData == context;
+    }
+    context->callbackComplete.notify_all();
+
+    context->unsubscribeError = rbusEvent_Unsubscribe(handle, context->eventName);
+    context->absentAfterUnsubscribe =
+        !rbusEvent_IsSubscriptionExist(handle, context->eventName, NULL);
+
+    context->subscribeError = rbusEvent_Subscribe(
+        handle,
+        context->eventName,
+        rbus_event_callback_reentry_handler,
+        context,
+        0);
+    context->presentAfterSubscribe =
+        rbusEvent_IsSubscriptionExist(handle, context->eventName, NULL);
+
+    {
+        std::lock_guard<std::mutex> lock(context->mutex);
+        context->callbackCompleted = true;
+    }
+    context->callbackComplete.notify_all();
+}
+
+TEST(RbusEventCallbackReentry, SubscribeAndUnsubscribeOnSameHandleDoNotDeadlock)
+{
+    static const char eventName[] = "Device.RbusEventCallbackReentry.Event!";
+    static const char providerName[] = "RbusEventCallbackReentryProvider";
+    static const char consumerName[] = "RbusEventCallbackReentryConsumer";
+    const std::chrono::seconds callbackDeadline(5);
+
+    rbusHandle_t providerHandle = NULL;
+    rbusHandle_t consumerHandle = NULL;
+    rbusDataElement_t eventElement = {
+        (char*)eventName,
+        RBUS_ELEMENT_TYPE_EVENT,
+        {NULL, NULL, NULL, NULL, NULL, NULL}
+    };
+    RbusEventCallbackReentryContext context = {
+        eventName,
+        std::mutex(),
+        std::condition_variable(),
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        RBUS_ERROR_BUS_ERROR,
+        RBUS_ERROR_BUS_ERROR
+    };
+
+    ASSERT_EQ(rbus_open(&providerHandle, providerName), RBUS_ERROR_SUCCESS);
+    ASSERT_EQ(rbus_regDataElements(providerHandle, 1, &eventElement), RBUS_ERROR_SUCCESS);
+    ASSERT_EQ(rbus_open(&consumerHandle, consumerName), RBUS_ERROR_SUCCESS);
+    ASSERT_EQ(
+        rbusEvent_Subscribe(
+            consumerHandle,
+            eventName,
+            rbus_event_callback_reentry_handler,
+            &context,
+            0),
+        RBUS_ERROR_SUCCESS);
+
+    rbusEvent_t event = {eventName, RBUS_EVENT_GENERAL, NULL};
+    ASSERT_EQ(rbusEvent_Publish(providerHandle, &event), RBUS_ERROR_SUCCESS);
+
+    bool callbackEntered = false;
+    bool callbackCompleted = false;
+    {
+        std::unique_lock<std::mutex> lock(context.mutex);
+        callbackEntered = context.callbackComplete.wait_for(
+            lock,
+            callbackDeadline,
+            [&context] { return context.callbackEntered; });
+        callbackCompleted = callbackEntered && context.callbackComplete.wait_for(
+            lock,
+            callbackDeadline,
+            [&context] { return context.callbackCompleted; });
+    }
+
+    ASSERT_TRUE(callbackEntered) << "The published event did not reach the callback.";
+    /*
+     * Do not attempt connection teardown after this deadline failure: teardown
+     * may wait on the same lock held by a regressed callback implementation.
+     */
+    ASSERT_TRUE(callbackCompleted)
+        << "Nested same-handle unsubscribe/subscribe did not complete before the deadline.";
+
+    EXPECT_TRUE(context.eventSnapshotValid);
+    EXPECT_TRUE(context.subscriptionSnapshotValid);
+    EXPECT_EQ(context.unsubscribeError, RBUS_ERROR_SUCCESS);
+    EXPECT_TRUE(context.absentAfterUnsubscribe);
+    EXPECT_EQ(context.subscribeError, RBUS_ERROR_SUCCESS);
+    EXPECT_TRUE(context.presentAfterSubscribe);
+
+    EXPECT_EQ(rbusEvent_Unsubscribe(consumerHandle, eventName), RBUS_ERROR_SUCCESS);
+    EXPECT_EQ(rbus_close(consumerHandle), RBUS_ERROR_SUCCESS);
+    EXPECT_EQ(rbus_unregDataElements(providerHandle, 1, &eventElement), RBUS_ERROR_SUCCESS);
+    EXPECT_EQ(rbus_close(providerHandle), RBUS_ERROR_SUCCESS);
 }
 
 TEST_F(EventClientAPIs, sample_test)
