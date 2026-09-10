@@ -39,6 +39,9 @@
 #include "rbus_log.h"
 #include "rbus_handle.h"
 #include "rbus_message.h"
+#ifdef BUILD_RBUS_DIAGNOSTICS_REPORTER
+#include "rbus_diagnostics.h"
+#endif
 
 //******************************* MACROS *****************************************//
 #define UNUSED1(a)              (void)(a)
@@ -3393,6 +3396,13 @@ rbusError_t rbus_regDataElements(
             sDisConnHandler = true;
     }
 #endif
+#ifdef BUILD_RBUS_DIAGNOSTICS_REPORTER
+    if (rc == RBUS_ERROR_SUCCESS) {
+        rbusDiagnosticsPublishProviderLifecycle(
+            handleInfo->componentName,
+            RBUS_DIAGNOSTICS_LIFECYCLE_REGISTERED);
+    }
+#endif
     return rc;
 }
 
@@ -3427,6 +3437,11 @@ rbusError_t rbus_unregDataElements(
         removeElement(&(handleInfo->elementRoot), name);
 */
     }
+#ifdef BUILD_RBUS_DIAGNOSTICS_REPORTER
+    rbusDiagnosticsPublishProviderLifecycle(
+        handleInfo->componentName,
+        RBUS_DIAGNOSTICS_LIFECYCLE_REMOVED);
+#endif
     return RBUS_ERROR_SUCCESS;
 }
 
@@ -3489,27 +3504,39 @@ rbusError_t rbus_get(rbusHandle_t handle, char const* name, rbusValue_t* value)
 {
     rbusError_t errorcode = RBUS_ERROR_SUCCESS;
     rbusCoreError_t err = RBUSCORE_SUCCESS;
-    VERIFY_HANDLE(handle);
+#ifdef BUILD_RBUS_DIAGNOSTICS_REPORTER
+    uint64_t diagnosticsStartUs = rbusDiagnosticsCaptureStartUs();
+#endif
+    if (handle == NULL) {
+        errorcode = RBUS_ERROR_INVALID_INPUT;
+        goto diagnostics_complete;
+    }
+    if (!rbusHandleList_IsValidHandle((struct _rbusHandle*)handle)) {
+        errorcode = RBUS_ERROR_INVALID_HANDLE;
+        goto diagnostics_complete;
+    }
     rbusMessage request, response;
     int ret = -1;
     struct _rbusHandle* handleInfo = (struct _rbusHandle*) handle;
 
-    VERIFY_NULL(handleInfo);
-
-    if (handleInfo->m_handleType != RBUS_HWDL_TYPE_REGULAR)
-        return RBUS_ERROR_INVALID_HANDLE;
+    if (handleInfo->m_handleType != RBUS_HWDL_TYPE_REGULAR) {
+        errorcode = RBUS_ERROR_INVALID_HANDLE;
+        goto diagnostics_complete;
+    }
 
     /* Is it a valid Query */
     if (!_is_valid_get_query(name))
     {
         RBUSLOG_WARN("This method is only to get Parameters");
-        return RBUS_ERROR_INVALID_INPUT;
+        errorcode = RBUS_ERROR_INVALID_INPUT;
+        goto diagnostics_complete;
     }
 
     if (_is_wildcard_query(name))
     {
         RBUSLOG_WARN("This method does not support wildcard query");
-        return RBUS_ERROR_ACCESS_NOT_ALLOWED;
+        errorcode = RBUS_ERROR_ACCESS_NOT_ALLOWED;
+        goto diagnostics_complete;
     }
 
     rbusMessage_Init(&request);
@@ -3579,6 +3606,11 @@ rbusError_t rbus_get(rbusHandle_t handle, char const* name, rbusValue_t* value)
         }
         rbusMessage_Release(response);
     }
+diagnostics_complete:
+#ifdef BUILD_RBUS_DIAGNOSTICS_REPORTER
+    rbusDiagnosticsPublishCompleted(
+        RBUS_DIAGNOSTICS_OPERATION_GET, diagnosticsStartUs, errorcode);
+#endif
     return errorcode;
 }
 
@@ -3993,26 +4025,40 @@ rbusError_t _setInternal(rbusHandle_t handle, char const* name, rbusValue_t valu
 {
     rbusError_t errorcode = RBUS_ERROR_INVALID_INPUT;
     rbusCoreError_t err = RBUSCORE_SUCCESS;
-    VERIFY_HANDLE(handle);
+#ifdef BUILD_RBUS_DIAGNOSTICS_REPORTER
+    uint64_t diagnosticsStartUs = rbusDiagnosticsCaptureStartUs();
+#endif
+    if (handle == NULL) {
+        errorcode = RBUS_ERROR_INVALID_INPUT;
+        goto diagnostics_complete;
+    }
+    if (!rbusHandleList_IsValidHandle((struct _rbusHandle*)handle)) {
+        errorcode = RBUS_ERROR_INVALID_HANDLE;
+        goto diagnostics_complete;
+    }
     rbusMessage setRequest, setResponse;
     struct _rbusHandle* handleInfo = (struct _rbusHandle*) handle;
 
-    VERIFY_NULL(handle);
-    VERIFY_NULL(name);
-    VERIFY_NULL(value);
+    if (name == NULL || value == NULL) {
+        errorcode = RBUS_ERROR_INVALID_INPUT;
+        goto diagnostics_complete;
+    }
 
-    if (handleInfo->m_handleType != RBUS_HWDL_TYPE_REGULAR)
-        return RBUS_ERROR_INVALID_HANDLE;
+    if (handleInfo->m_handleType != RBUS_HWDL_TYPE_REGULAR) {
+        errorcode = RBUS_ERROR_INVALID_HANDLE;
+        goto diagnostics_complete;
+    }
 
     if (_is_wildcard_query(name))
     {
         RBUSLOG_WARN("This method does not support wildcard query [%s]", name);
-        return RBUS_ERROR_INVALID_INPUT;
+        errorcode = RBUS_ERROR_INVALID_INPUT;
+        goto diagnostics_complete;
     }
 
     if (RBUS_NONE == rbusValue_GetType(value))
     {
-        return errorcode;
+        goto diagnostics_complete;
     }
     rbusMessage_Init(&setRequest);
     /* Set the Session ID first */
@@ -4075,6 +4121,11 @@ rbusError_t _setInternal(rbusHandle_t handle, char const* name, rbusValue_t valu
         /* Release the reponse message */
         rbusMessage_Release(setResponse);
     }
+diagnostics_complete:
+#ifdef BUILD_RBUS_DIAGNOSTICS_REPORTER
+    rbusDiagnosticsPublishCompleted(
+        RBUS_DIAGNOSTICS_OPERATION_SET, diagnosticsStartUs, errorcode);
+#endif
     return errorcode;
 }
 
@@ -4484,22 +4535,46 @@ rbusError_t rbusTable_addRow(
     rbusCoreError_t err;
     int returnCode = 0;
     int32_t instanceId = 0;
+    uint64_t diagnosticsStartUs;
     const char dot = '.';
     rbusMessage request, response;
     struct _rbusHandle* handleInfo = (struct _rbusHandle*) handle;
     rbusLegacyReturn_t legacyRetCode = RBUS_LEGACY_ERR_FAILURE;
 
-    VERIFY_NULL(handle);
-    VERIFY_NULL(tableName);
+    diagnosticsStartUs = rbusDiagnosticsCaptureStartUs();
+    if (NULL == handle)
+    {
+        RBUSLOG_WARN("handle is NULL");
+        rbusDiagnosticsPublishCompletedForPath(
+            RBUS_DIAGNOSTICS_OPERATION_TABLE, diagnosticsStartUs,
+            RBUS_ERROR_INVALID_INPUT, tableName);
+        return RBUS_ERROR_INVALID_INPUT;
+    }
+    if (NULL == tableName)
+    {
+        RBUSLOG_WARN("tableName is NULL");
+        rbusDiagnosticsPublishCompletedForPath(
+            RBUS_DIAGNOSTICS_OPERATION_TABLE, diagnosticsStartUs,
+            RBUS_ERROR_INVALID_INPUT, NULL);
+        return RBUS_ERROR_INVALID_INPUT;
+    }
 
     if (handleInfo->m_handleType != RBUS_HWDL_TYPE_REGULAR)
+    {
+        rbusDiagnosticsPublishCompletedForPath(
+            RBUS_DIAGNOSTICS_OPERATION_TABLE, diagnosticsStartUs,
+            RBUS_ERROR_INVALID_HANDLE, tableName);
         return RBUS_ERROR_INVALID_HANDLE;
+    }
 
     RBUSLOG_DEBUG(" %s %s", tableName, aliasName);
 
     if(tableName[strlen(tableName)-1] != dot)
     {
         RBUSLOG_WARN("invalid table name %s", tableName);
+        rbusDiagnosticsPublishCompletedForPath(
+            RBUS_DIAGNOSTICS_OPERATION_TABLE, diagnosticsStartUs,
+            RBUS_ERROR_INVALID_INPUT, tableName);
         return RBUS_ERROR_INVALID_INPUT;
     }
 
@@ -4526,7 +4601,7 @@ rbusError_t rbusTable_addRow(
         &response)) != RBUSCORE_SUCCESS)
     {
         RBUSLOG_ERROR("%s for %s failed with error: %s", __FUNCTION__, tableName, rbusCoreErrorToString(err));
-        return rbusCoreError_to_rbusError(err);
+        returnCode = rbusCoreError_to_rbusError(err);
     }
     else
     {
@@ -4554,6 +4629,9 @@ rbusError_t rbusTable_addRow(
         rbusMessage_Release(response);
     }
 
+    rbusDiagnosticsPublishCompletedForPath(
+        RBUS_DIAGNOSTICS_OPERATION_TABLE, diagnosticsStartUs,
+        (rbusError_t)returnCode, tableName);
     return returnCode;
 }
 
@@ -4563,15 +4641,36 @@ rbusError_t rbusTable_removeRow(
 {
     rbusCoreError_t err;
     int returnCode = 0;
+    uint64_t diagnosticsStartUs;
     rbusMessage request, response;
     struct _rbusHandle* handleInfo = (struct _rbusHandle*) handle;
     rbusLegacyReturn_t legacyRetCode = RBUS_LEGACY_ERR_FAILURE;
 
-    VERIFY_NULL(handle);
-    VERIFY_NULL(rowName);
+    diagnosticsStartUs = rbusDiagnosticsCaptureStartUs();
+    if (NULL == handle)
+    {
+        RBUSLOG_WARN("handle is NULL");
+        rbusDiagnosticsPublishCompletedForPath(
+            RBUS_DIAGNOSTICS_OPERATION_TABLE, diagnosticsStartUs,
+            RBUS_ERROR_INVALID_INPUT, rowName);
+        return RBUS_ERROR_INVALID_INPUT;
+    }
+    if (NULL == rowName)
+    {
+        RBUSLOG_WARN("rowName is NULL");
+        rbusDiagnosticsPublishCompletedForPath(
+            RBUS_DIAGNOSTICS_OPERATION_TABLE, diagnosticsStartUs,
+            RBUS_ERROR_INVALID_INPUT, NULL);
+        return RBUS_ERROR_INVALID_INPUT;
+    }
 
     if (handleInfo->m_handleType != RBUS_HWDL_TYPE_REGULAR)
+    {
+        rbusDiagnosticsPublishCompletedForPath(
+            RBUS_DIAGNOSTICS_OPERATION_TABLE, diagnosticsStartUs,
+            RBUS_ERROR_INVALID_HANDLE, rowName);
         return RBUS_ERROR_INVALID_HANDLE;
+    }
 
     RBUSLOG_DEBUG("Remove row: %s", rowName);
 
@@ -4592,7 +4691,7 @@ rbusError_t rbusTable_removeRow(
         &response)) != RBUSCORE_SUCCESS)
     {
         RBUSLOG_ERROR(" %s for %s failed with error: %s", __FUNCTION__, rowName, rbusCoreErrorToString(err));
-        return rbusCoreError_to_rbusError(err);
+        returnCode = rbusCoreError_to_rbusError(err);
     }
     else
     {
@@ -4616,6 +4715,9 @@ rbusError_t rbusTable_removeRow(
         rbusMessage_Release(response);
     }
 
+    rbusDiagnosticsPublishCompletedForPath(
+        RBUS_DIAGNOSTICS_OPERATION_TABLE, diagnosticsStartUs,
+        (rbusError_t)returnCode, rowName);
     return returnCode;
 }
 
@@ -4693,13 +4795,27 @@ rbusError_t rbusTable_getRowNames(
 {
     rbusError_t errorcode = RBUS_ERROR_SUCCESS;
     rbusCoreError_t err = RBUSCORE_SUCCESS;
+    uint64_t diagnosticsStartUs;
     rbusMessage request, response;
     struct _rbusHandle* handleInfo = (struct _rbusHandle*) handle;
 
-    VERIFY_NULL(handle);
+    diagnosticsStartUs = rbusDiagnosticsCaptureStartUs();
+    if (NULL == handle)
+    {
+        RBUSLOG_WARN("handle is NULL");
+        rbusDiagnosticsPublishCompletedForPath(
+            RBUS_DIAGNOSTICS_OPERATION_TABLE, diagnosticsStartUs,
+            RBUS_ERROR_INVALID_INPUT, tableName);
+        return RBUS_ERROR_INVALID_INPUT;
+    }
 
     if (handleInfo->m_handleType != RBUS_HWDL_TYPE_REGULAR)
+    {
+        rbusDiagnosticsPublishCompletedForPath(
+            RBUS_DIAGNOSTICS_OPERATION_TABLE, diagnosticsStartUs,
+            RBUS_ERROR_INVALID_HANDLE, tableName);
         return RBUS_ERROR_INVALID_HANDLE;
+    }
 
     *rowNames = NULL;
 
@@ -4744,6 +4860,9 @@ rbusError_t rbusTable_getRowNames(
                 {
                     RBUSLOG_ERROR("failed to malloc %d row names", count);
                     rbusMessage_Release(response);
+                    rbusDiagnosticsPublishCompletedForPath(
+                        RBUS_DIAGNOSTICS_OPERATION_TABLE, diagnosticsStartUs,
+                        RBUS_ERROR_OUT_OF_RESOURCES, tableName);
                     return RBUS_ERROR_OUT_OF_RESOURCES;
                 }
             }
@@ -4784,6 +4903,9 @@ rbusError_t rbusTable_getRowNames(
         RBUSLOG_ERROR("getparamnames %s failed with buss err %d", tableName, err);
         errorcode = rbusCoreError_to_rbusError(err);
     }
+    rbusDiagnosticsPublishCompletedForPath(
+        RBUS_DIAGNOSTICS_OPERATION_TABLE, diagnosticsStartUs,
+        errorcode, tableName);
     return errorcode;
 }
 
@@ -5380,20 +5502,30 @@ rbusError_t  rbusEvent_Subscribe(
     int                 timeout)
 {
     rbusError_t errorcode;
+    uint64_t diagnosticsStartUs;
     VERIFY_HANDLE(handle);
     struct _rbusHandle* handleInfo = (struct _rbusHandle*)handle;
 
     VERIFY_NULL(handle);
     VERIFY_NULL(eventName);
     VERIFY_NULL(handler);
+    diagnosticsStartUs = rbusDiagnosticsCaptureStartUs();
 
     if (handleInfo->m_handleType != RBUS_HWDL_TYPE_REGULAR)
+    {
+        rbusDiagnosticsPublishCompletedForPath(
+            RBUS_DIAGNOSTICS_OPERATION_EVENT_SUBSCRIBE, diagnosticsStartUs,
+            RBUS_ERROR_INVALID_HANDLE, eventName);
         return RBUS_ERROR_INVALID_HANDLE;
+    }
 
     RBUSLOG_DEBUG("Subscribe for event %s", eventName);
 
     errorcode = rbusEvent_SubscribeWithRetries(handle, eventName, handler, userData, NULL, 0, 0 , timeout, NULL, false, false);
 
+    rbusDiagnosticsPublishCompletedForPath(
+        RBUS_DIAGNOSTICS_OPERATION_EVENT_SUBSCRIBE, diagnosticsStartUs,
+        errorcode, eventName);
     return errorcode;
 }
 
@@ -5428,15 +5560,22 @@ rbusError_t rbusEvent_Unsubscribe(
     rbusHandle_t        handle,
     char const*         eventName)
 {
+    uint64_t diagnosticsStartUs;
     VERIFY_HANDLE(handle);
     struct _rbusHandle* handleInfo = (struct _rbusHandle*)handle;
     rbusEventSubscriptionInternal_t* subInternal;
 
     VERIFY_NULL(handle);
     VERIFY_NULL(eventName);
+    diagnosticsStartUs = rbusDiagnosticsCaptureStartUs();
 
     if (handleInfo->m_handleType != RBUS_HWDL_TYPE_REGULAR)
+    {
+        rbusDiagnosticsPublishCompletedForPath(
+            RBUS_DIAGNOSTICS_OPERATION_EVENT_UNSUBSCRIBE, diagnosticsStartUs,
+            RBUS_ERROR_INVALID_HANDLE, eventName);
         return RBUS_ERROR_INVALID_HANDLE;
+    }
 
     RBUSLOG_DEBUG("Unsubscribe for event %s", eventName);
 
@@ -5461,6 +5600,9 @@ rbusError_t rbusEvent_Unsubscribe(
         {
             rtVector_RemoveItem(handleInfo->eventSubs, subInternal, rbusEventSubscriptionInternal_free);
             HANDLE_EVENTSUBS_MUTEX_UNLOCK(handle);
+            rbusDiagnosticsPublishCompletedForPath(
+                RBUS_DIAGNOSTICS_OPERATION_EVENT_UNSUBSCRIBE, diagnosticsStartUs,
+                RBUS_ERROR_SUCCESS, eventName);
             return RBUS_ERROR_SUCCESS;
         }
         else
@@ -5476,6 +5618,9 @@ rbusError_t rbusEvent_Unsubscribe(
                 RBUSLOG_ERROR("%s failed with core err=%d", eventName, coreerr);
                 rtVector_RemoveItem(handleInfo->eventSubs, subInternal, rbusEventSubscriptionInternal_free);
                 HANDLE_EVENTSUBS_MUTEX_UNLOCK(handle);
+                rbusDiagnosticsPublishCompletedForPath(
+                    RBUS_DIAGNOSTICS_OPERATION_EVENT_UNSUBSCRIBE, diagnosticsStartUs,
+                    RBUS_ERROR_BUS_ERROR, eventName);
                 return RBUS_ERROR_BUS_ERROR;
             }
         }
@@ -5484,9 +5629,15 @@ rbusError_t rbusEvent_Unsubscribe(
     {
         RBUSLOG_INFO("%s no existing subscription found", eventName);
         HANDLE_EVENTSUBS_MUTEX_UNLOCK(handle);
+        rbusDiagnosticsPublishCompletedForPath(
+            RBUS_DIAGNOSTICS_OPERATION_EVENT_UNSUBSCRIBE, diagnosticsStartUs,
+            RBUS_ERROR_INVALID_OPERATION, eventName);
         return RBUS_ERROR_INVALID_OPERATION; //TODO - is the the right error to return
     }
     HANDLE_EVENTSUBS_MUTEX_UNLOCK(handle);
+    rbusDiagnosticsPublishCompletedForPath(
+        RBUS_DIAGNOSTICS_OPERATION_EVENT_UNSUBSCRIBE, diagnosticsStartUs,
+        RBUS_ERROR_SUCCESS, eventName);
     return RBUS_ERROR_SUCCESS;
 }
 
@@ -5960,12 +6111,19 @@ rbusError_t  rbusEvent_Publish(
     rbusSubscription_t* subscription;
     rbusValue_t newVal = NULL;
     rbusValue_t oldVal = NULL;
+    uint64_t diagnosticsStartUs;
 
     VERIFY_NULL(handle);
     VERIFY_NULL(eventData);
+    diagnosticsStartUs = rbusDiagnosticsCaptureStartUs();
 
     if (handleInfo->m_handleType != RBUS_HWDL_TYPE_REGULAR)
+    {
+        rbusDiagnosticsPublishCompletedForPath(
+            RBUS_DIAGNOSTICS_OPERATION_EVENT_PUBLISH, diagnosticsStartUs,
+            RBUS_ERROR_INVALID_HANDLE, eventData->name);
         return RBUS_ERROR_INVALID_HANDLE;
+    }
 
     RBUSLOG_DEBUG("Publish for %s", eventData->name);
 
@@ -5976,11 +6134,21 @@ rbusError_t  rbusEvent_Publish(
     if(!el)
     {
         RBUSLOG_WARN("Publish failed! retrieveElement return NULL for %s", eventData->name);
+        rbusDiagnosticsPublishCompletedForPath(
+            RBUS_DIAGNOSTICS_OPERATION_EVENT_PUBLISH, diagnosticsStartUs,
+            RBUS_ERROR_ELEMENT_DOES_NOT_EXIST, eventData->name);
         return RBUS_ERROR_ELEMENT_DOES_NOT_EXIST;
     }
 
     if(!el->subscriptions)/*nobody subscribed yet*/
     {
+        /*
+         * NOSUBSCRIBERS is distinct from a failed delivery. Its approved
+         * diagnostic classification remains UNKNOWN_ERROR.
+         */
+        rbusDiagnosticsPublishCompletedForPath(
+            RBUS_DIAGNOSTICS_OPERATION_EVENT_PUBLISH, diagnosticsStartUs,
+            RBUS_ERROR_NOSUBSCRIBERS, eventData->name);
         return RBUS_ERROR_NOSUBSCRIBERS;
     }
 
@@ -5994,6 +6162,9 @@ rbusError_t  rbusEvent_Publish(
         if(!eventData->data || !newVal || !oldVal)
         {
             RBUSLOG_ERROR("missing value data for value change event %s", eventData->name);
+            rbusDiagnosticsPublishCompletedForPath(
+                RBUS_DIAGNOSTICS_OPERATION_EVENT_PUBLISH, diagnosticsStartUs,
+                RBUS_ERROR_INVALID_INPUT, eventData->name);
             return RBUS_ERROR_INVALID_INPUT;
         }
     }
@@ -6076,7 +6247,14 @@ rbusError_t  rbusEvent_Publish(
     }
     HANDLE_SUBS_MUTEX_UNLOCK(handle);
 
-    return errOut == RBUSCORE_SUCCESS ? RBUS_ERROR_SUCCESS: RBUS_ERROR_BUS_ERROR;
+    {
+        rbusError_t result =
+            errOut == RBUSCORE_SUCCESS ? RBUS_ERROR_SUCCESS : RBUS_ERROR_BUS_ERROR;
+        rbusDiagnosticsPublishCompletedForPath(
+            RBUS_DIAGNOSTICS_OPERATION_EVENT_PUBLISH, diagnosticsStartUs,
+            result, eventData->name);
+        return result;
+    }
 }
 
 rbusError_t rbusMethod_InvokeInternal(
@@ -6164,16 +6342,52 @@ rbusError_t rbusMethod_Invoke(
     rbusObject_t inParams,
     rbusObject_t* outParams)
 {
-    VERIFY_HANDLE(handle);
-    VERIFY_NULL(methodName);
-    VERIFY_NULL(outParams);
+#ifdef BUILD_RBUS_DIAGNOSTICS_REPORTER
+    uint64_t diagnosticsStartUs = rbusDiagnosticsCaptureStartUs();
+    rbusError_t diagnosticsResult;
+#endif
+    if (handle == NULL || methodName == NULL || outParams == NULL) {
+#ifdef BUILD_RBUS_DIAGNOSTICS_REPORTER
+        rbusDiagnosticsPublishCompleted(
+            RBUS_DIAGNOSTICS_OPERATION_METHOD,
+            diagnosticsStartUs,
+            RBUS_ERROR_INVALID_INPUT);
+#endif
+        return RBUS_ERROR_INVALID_INPUT;
+    }
+    if (!rbusHandleList_IsValidHandle((struct _rbusHandle*)handle)) {
+#ifdef BUILD_RBUS_DIAGNOSTICS_REPORTER
+        rbusDiagnosticsPublishCompleted(
+            RBUS_DIAGNOSTICS_OPERATION_METHOD,
+            diagnosticsStartUs,
+            RBUS_ERROR_INVALID_HANDLE);
+#endif
+        return RBUS_ERROR_INVALID_HANDLE;
+    }
 
     struct _rbusHandle* handleInfo = (struct _rbusHandle*)handle;
 
-    if (handleInfo->m_handleType != RBUS_HWDL_TYPE_REGULAR)
+    if (handleInfo->m_handleType != RBUS_HWDL_TYPE_REGULAR) {
+#ifdef BUILD_RBUS_DIAGNOSTICS_REPORTER
+        rbusDiagnosticsPublishCompleted(
+            RBUS_DIAGNOSTICS_OPERATION_METHOD,
+            diagnosticsStartUs,
+            RBUS_ERROR_INVALID_HANDLE);
+#endif
         return RBUS_ERROR_INVALID_HANDLE;
+    }
 
+#ifdef BUILD_RBUS_DIAGNOSTICS_REPORTER
+    diagnosticsResult = rbusMethod_InvokeInternal(
+        handle, methodName, inParams, outParams, rbusHandle_FetchSetTimeout(handle));
+    rbusDiagnosticsPublishCompleted(
+        RBUS_DIAGNOSTICS_OPERATION_METHOD,
+        diagnosticsStartUs,
+        diagnosticsResult);
+    return diagnosticsResult;
+#else
     return rbusMethod_InvokeInternal(handle, methodName, inParams, outParams, rbusHandle_FetchSetTimeout(handle));
+#endif
 }
 
 typedef struct _rbusMethodInvokeAsyncData_t
@@ -6183,6 +6397,9 @@ typedef struct _rbusMethodInvokeAsyncData_t
     rbusObject_t inParams;
     rbusMethodAsyncRespHandler_t callback;
     int timeout;
+#ifdef BUILD_RBUS_DIAGNOSTICS_REPORTER
+    uint64_t diagnosticsStartUs;
+#endif
 } rbusMethodInvokeAsyncData_t;
 
 static void* rbusMethod_InvokeAsyncThreadFunc(void *p)
@@ -6199,6 +6416,12 @@ static void* rbusMethod_InvokeAsyncThreadFunc(void *p)
         &outParams,
         data->timeout);
 
+#ifdef BUILD_RBUS_DIAGNOSTICS_REPORTER
+    rbusDiagnosticsPublishCompleted(
+        RBUS_DIAGNOSTICS_OPERATION_ASYNC_METHOD,
+        data->diagnosticsStartUs,
+        err);
+#endif
     data->callback(data->handle, data->methodName, err, outParams);
 
     rbusObject_Release(data->inParams);
@@ -6217,17 +6440,42 @@ rbusError_t rbusMethod_InvokeAsync(
     rbusMethodAsyncRespHandler_t callback,
     int timeout)
 {
-    VERIFY_HANDLE(handle);
-    VERIFY_NULL(methodName);
-    VERIFY_NULL(callback);
+#ifdef BUILD_RBUS_DIAGNOSTICS_REPORTER
+    uint64_t diagnosticsStartUs = rbusDiagnosticsCaptureStartUs();
+#endif
+    if (handle == NULL || methodName == NULL || callback == NULL) {
+#ifdef BUILD_RBUS_DIAGNOSTICS_REPORTER
+        rbusDiagnosticsPublishCompleted(
+            RBUS_DIAGNOSTICS_OPERATION_ASYNC_METHOD,
+            diagnosticsStartUs,
+            RBUS_ERROR_INVALID_INPUT);
+#endif
+        return RBUS_ERROR_INVALID_INPUT;
+    }
+    if (!rbusHandleList_IsValidHandle((struct _rbusHandle*)handle)) {
+#ifdef BUILD_RBUS_DIAGNOSTICS_REPORTER
+        rbusDiagnosticsPublishCompleted(
+            RBUS_DIAGNOSTICS_OPERATION_ASYNC_METHOD,
+            diagnosticsStartUs,
+            RBUS_ERROR_INVALID_HANDLE);
+#endif
+        return RBUS_ERROR_INVALID_HANDLE;
+    }
 
     struct _rbusHandle* handleInfo = (struct _rbusHandle*)handle;
     pthread_t pid;
     rbusMethodInvokeAsyncData_t* data;
     int err = 0;
 
-    if (handleInfo->m_handleType != RBUS_HWDL_TYPE_REGULAR)
+    if (handleInfo->m_handleType != RBUS_HWDL_TYPE_REGULAR) {
+#ifdef BUILD_RBUS_DIAGNOSTICS_REPORTER
+        rbusDiagnosticsPublishCompleted(
+            RBUS_DIAGNOSTICS_OPERATION_ASYNC_METHOD,
+            diagnosticsStartUs,
+            RBUS_ERROR_INVALID_HANDLE);
+#endif
         return RBUS_ERROR_INVALID_HANDLE;
+    }
 
     rbusObject_Retain(inParams);
 
@@ -6237,10 +6485,19 @@ rbusError_t rbusMethod_InvokeAsync(
     data->inParams = inParams;
     data->callback = callback;
     data->timeout = timeout > 0 ? (timeout * 1000) : (int)rbusHandle_FetchSetTimeout(handle); /* convert seconds to milliseconds */
+#ifdef BUILD_RBUS_DIAGNOSTICS_REPORTER
+    data->diagnosticsStartUs = diagnosticsStartUs;
+#endif
 
     if((err = pthread_create(&pid, NULL, rbusMethod_InvokeAsyncThreadFunc, data)) != 0)
     {
         RBUSLOG_ERROR("pthread_create failed: err=%d", err);
+#ifdef BUILD_RBUS_DIAGNOSTICS_REPORTER
+        rbusDiagnosticsPublishCompleted(
+            RBUS_DIAGNOSTICS_OPERATION_ASYNC_METHOD,
+            diagnosticsStartUs,
+            RBUS_ERROR_BUS_ERROR);
+#endif
         return RBUS_ERROR_BUS_ERROR;
     }
 

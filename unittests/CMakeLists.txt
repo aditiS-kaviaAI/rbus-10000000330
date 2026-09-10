@@ -76,6 +76,11 @@ target_link_libraries(rbus_event_server rbuscore)
 
 enable_testing()
 
+set(RBUS_DIAGNOSTICS_GTEST_SOURCES)
+if (BUILD_RBUS_DIAGNOSTICS_REPORTER)
+    list(APPEND RBUS_DIAGNOSTICS_GTEST_SOURCES rbusDiagnosticsTest.cpp)
+endif()
+
 add_executable(rbus_gtest.bin
   rbusValueTest.cpp
   rbusTokenTest.cpp
@@ -99,7 +104,8 @@ add_executable(rbus_gtest.bin
   rbus_unit_test_event_client.cpp
   rbus_unit_test_event_server.cpp
   util.cpp
-  main.cpp)
+  main.cpp
+  ${RBUS_DIAGNOSTICS_GTEST_SOURCES})
 add_dependencies(rbus_gtest.bin rbus)
 
 if (NOT GTEST_LIBRARIES)

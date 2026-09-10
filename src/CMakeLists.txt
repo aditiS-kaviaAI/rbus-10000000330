@@ -26,4 +26,8 @@ if (BUILD_RBUS_DAEMON)
 endif (BUILD_RBUS_DAEMON)
 
  add_subdirectory(rbus)
+
+ if (BUILD_RBUS_DIAGNOSTICS_REPORTER)
+  add_subdirectory(diagnostics-reporter)
+ endif (BUILD_RBUS_DIAGNOSTICS_REPORTER)
 ENDIF ()

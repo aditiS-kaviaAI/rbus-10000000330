@@ -1,0 +1,18 @@
+[Unit]
+Description=RBus bounded diagnostics reporter
+After=local-fs.target
+Wants=local-fs.target
+
+[Service]
+Type=simple
+User=root
+Group=rbusdiag
+UMask=0007
+RuntimeDirectory=rbus-diagnostics
+RuntimeDirectoryMode=0750
+ExecStart=/usr/bin/rbus-diagnostics-reporter
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

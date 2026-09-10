@@ -24,10 +24,16 @@ include_directories(${PROJECT_SOURCE_DIR}/src/rtmessage)
 include_directories(${PROJECT_SOURCE_DIR}/src/core)
 include_directories(${PROJECT_SOURCE_DIR}/src/session_manager)
 
+set(RBUS_DIAGNOSTICS_SOURCES)
+if (BUILD_RBUS_DIAGNOSTICS_REPORTER)
+    list(APPEND RBUS_DIAGNOSTICS_SOURCES rbus_diagnostics_client.c)
+endif()
+
 add_library(
     rbus
     SHARED
     rbus.c
+    ${RBUS_DIAGNOSTICS_SOURCES}
     rbus_handle.c
     rbus_message.c
     rbus_value.c
@@ -43,6 +49,10 @@ add_library(
     rbus_intervalsubscription.c)
 
 target_link_libraries(rbus rbuscore rtMessage -fPIC -pthread)
+
+if (BUILD_RBUS_DIAGNOSTICS_REPORTER)
+    target_compile_definitions(rbus PRIVATE BUILD_RBUS_DIAGNOSTICS_REPORTER=1)
+endif()
 
 target_include_directories (rbus PUBLIC ${RDKLOGGER_INCLUDE_DIRS})
 

@@ -22,10 +22,10 @@ cmake_minimum_required (VERSION 2.8.12)
 
 if (POLICY CMP0048)
   cmake_policy(SET CMP0048 NEW)
-  project(rbus VERSION 2.14.0)
+  project(rbus VERSION 2.13.0)
 else ()
   project(rbus)
-  set(PROJECT_VERSION "2.14.0")
+  set(PROJECT_VERSION "2.13.0")
 endif (POLICY CMP0048)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/")
@@ -84,6 +84,7 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rbusConfig.cmake"
 option(BUILD_RBUS_DAEMON "BUILD_RBUS_DAEMON" ON)
 option(BUILD_RBUS_SAMPLE_APPS "BUILD_RBUS_SAMPLE_APPS" ON)
 option(BUILD_RBUS_TEST_APPS "BUILD_RBUS_TEST_APPS" ON)
+option(BUILD_RBUS_DIAGNOSTICS_REPORTER "Build the optional local RBus diagnostics reporter" OFF)
 option(BUILD_ONLY_RTMESSAGE "BUILD_ONLY_RTMESSAGE" OFF)
 
 option(BUILD_RTMESSAGE_SAMPLE_APP "BUILD_RTMESSAGE_SAMPLE_APP" OFF)
