@@ -16,14 +16,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 ##########################################################################
-add_subdirectory(rtmessage)
+if (BUILD_RBUS_DIAGNOSTICS_REPORTER_ONLY)
+ if (BUILD_RBUS_DIAGNOSTICS_REPORTER)
+  add_subdirectory(diagnostics-reporter)
+ endif (BUILD_RBUS_DIAGNOSTICS_REPORTER)
+else ()
+ add_subdirectory(rtmessage)
 
-IF (NOT BUILD_ONLY_RTMESSAGE)
- add_subdirectory(core)
+ IF (NOT BUILD_ONLY_RTMESSAGE)
+  add_subdirectory(core)
 
-if (BUILD_RBUS_DAEMON)
-    add_subdirectory(session_manager)
-endif (BUILD_RBUS_DAEMON)
+  if (BUILD_RBUS_DAEMON)
+      add_subdirectory(session_manager)
+  endif (BUILD_RBUS_DAEMON)
 
- add_subdirectory(rbus)
-ENDIF ()
+  add_subdirectory(rbus)
+
+  if (BUILD_RBUS_DIAGNOSTICS_REPORTER)
+   add_subdirectory(diagnostics-reporter)
+  endif (BUILD_RBUS_DIAGNOSTICS_REPORTER)
+ ENDIF ()
+endif ()

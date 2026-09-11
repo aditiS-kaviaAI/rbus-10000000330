@@ -22,10 +22,10 @@ cmake_minimum_required (VERSION 2.8.12)
 
 if (POLICY CMP0048)
   cmake_policy(SET CMP0048 NEW)
-  project(rbus VERSION 2.14.0)
+  project(rbus VERSION 2.13.0)
 else ()
   project(rbus)
-  set(PROJECT_VERSION "2.14.0")
+  set(PROJECT_VERSION "2.13.0")
 endif (POLICY CMP0048)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/")
@@ -84,6 +84,13 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rbusConfig.cmake"
 option(BUILD_RBUS_DAEMON "BUILD_RBUS_DAEMON" ON)
 option(BUILD_RBUS_SAMPLE_APPS "BUILD_RBUS_SAMPLE_APPS" ON)
 option(BUILD_RBUS_TEST_APPS "BUILD_RBUS_TEST_APPS" ON)
+option(BUILD_RBUS_DIAGNOSTICS_REPORTER "BUILD_RBUS_DIAGNOSTICS_REPORTER" OFF)
+option(BUILD_RBUS_DIAGNOSTICS_REPORTER_ONLY
+       "Build only the standalone diagnostics reporter and its focused tests"
+       OFF)
+option(ENABLE_RBUS_DIAGNOSTICS
+       "Compile internal best-effort RBus diagnostics instrumentation"
+       OFF)
 option(BUILD_ONLY_RTMESSAGE "BUILD_ONLY_RTMESSAGE" OFF)
 
 option(BUILD_RTMESSAGE_SAMPLE_APP "BUILD_RTMESSAGE_SAMPLE_APP" OFF)
@@ -91,6 +98,11 @@ option(BUILD_RTMESSAGE_DATAPROVIDER_LIB "BUILD_RTMESSAGE_DATAPROVIDER_LIB" OFF)
 option(BUILD_RBUSCORE_BENCHMARK_TEST "BUILD_RBUSCORE_BENCHMARK_TEST" OFF)
 option(BUILD_RBUSCORE_TEST_APPS "BUILD_RBUSCORE_TEST_APPS" OFF)
 option(BUILD_SESSIONMGR_SAMPLE_APPS "BUILD_SESSIONMGR_SAMPLE_APPS" OFF)
+
+if (BUILD_RBUS_DIAGNOSTICS_REPORTER_ONLY AND NOT BUILD_RBUS_DIAGNOSTICS_REPORTER)
+  message(FATAL_ERROR
+    "BUILD_RBUS_DIAGNOSTICS_REPORTER_ONLY requires BUILD_RBUS_DIAGNOSTICS_REPORTER=ON")
+endif ()
 
 option(ENABLE_RDKLOGGER "ENABLE_RDKLOGGER" OFF)
 option(RDKC_BUILD "RDKC_BUILD" OFF)
@@ -128,24 +140,30 @@ if (BUILD_FOR_DESKTOP)
     ${LIBRARY_DIR})
 
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/deps/src/linenoise/liblinenoise.so DESTINATION ${CMAKE_INSTALL_LIBDIR})
-  find_package(cJSON REQUIRED)
-  find_package(msgpack REQUIRED) 
+  if (NOT BUILD_RBUS_DIAGNOSTICS_REPORTER_ONLY)
+    find_package(cJSON REQUIRED)
+    find_package(msgpack REQUIRED)
+  endif ()
   
 
 else()
-  find_package(cJSON REQUIRED)
-  IF (NOT BUILD_ONLY_RTMESSAGE)
-   find_package(msgpack REQUIRED)
-   find_package(linenoise REQUIRED)
-  ENDIF()
+  if (NOT BUILD_RBUS_DIAGNOSTICS_REPORTER_ONLY)
+    find_package(cJSON REQUIRED)
+    IF (NOT BUILD_ONLY_RTMESSAGE)
+     find_package(msgpack REQUIRED)
+     find_package(linenoise REQUIRED)
+    ENDIF()
+  endif ()
   set(INCLUDE_DIR ${CMAKE_INSTALL_PREFIX}/include)
   set(LIBRARY_DIR ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR})
 
   include_directories(${CMAKE_CURRENT_SOURCE_DIR})
-  include_directories(${CJSON_INCLUDE_DIRS})
-  IF (NOT BUILD_ONLY_RTMESSAGE)
-   include_directories(${MSGPACK_INCLUDE_DIRS})
-  ENDIF ()
+  if (NOT BUILD_RBUS_DIAGNOSTICS_REPORTER_ONLY)
+    include_directories(${CJSON_INCLUDE_DIRS})
+    IF (NOT BUILD_ONLY_RTMESSAGE)
+     include_directories(${MSGPACK_INCLUDE_DIRS})
+    ENDIF ()
+  endif ()
 
   link_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -208,15 +226,17 @@ endif (ENABLE_RDKLOGGER)
 
 add_subdirectory(src)
 
-IF (NOT BUILD_ONLY_RTMESSAGE)
-   add_subdirectory(utils)
-   add_subdirectory(test)
-ENDIF ()
+if (NOT BUILD_RBUS_DIAGNOSTICS_REPORTER_ONLY)
+  IF (NOT BUILD_ONLY_RTMESSAGE)
+     add_subdirectory(utils)
+     add_subdirectory(test)
+  ENDIF ()
 
-if(BUILD_RBUS_SAMPLE_APPS)
-    add_subdirectory(sampleapps)
-endif()
+  if(BUILD_RBUS_SAMPLE_APPS)
+      add_subdirectory(sampleapps)
+  endif()
 
-if (ENABLE_UNIT_TESTING)
-    add_subdirectory(unittests)
-endif()
+  if (ENABLE_UNIT_TESTING)
+      add_subdirectory(unittests)
+  endif()
+endif ()

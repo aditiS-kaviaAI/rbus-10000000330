@@ -321,6 +321,13 @@ void client_subscription_destroy(void* p)
 #define MAX_DAEMON_ADDRESS_LEN 256
 static char g_daemon_address[MAX_DAEMON_ADDRESS_LEN] = "unix:///tmp/rtrouted";
 static rtConnection g_connection = NULL;
+#ifdef RBUS_DIAGNOSTICS_TESTING
+/*
+ * This process-local value is used only by the diagnostics live harness.
+ * Production builds retain the normal configuration-file lookup unchanged.
+ */
+static char g_test_daemon_address[MAX_DAEMON_ADDRESS_LEN];
+#endif
 static rtVector g_server_objects; /*server_object_t list*/
 static pthread_mutex_t g_mutex;
 static pthread_mutex_t g_directCliMutex;
@@ -547,6 +554,12 @@ static void onMessage(rtMessageHeader const* hdr, uint8_t const* data, uint32_t 
 
 static void configure_router_address()
 {
+#ifdef RBUS_DIAGNOSTICS_TESTING
+    if(g_test_daemon_address[0] != '\0')
+    {
+        return;
+    }
+#endif
     FILE* fconfig = fopen("/etc/rbus_client.conf", "r");
     if(fconfig)
     {
@@ -585,6 +598,21 @@ static void configure_router_address()
         fclose(fconfig);
     }
 }
+
+#ifdef RBUS_DIAGNOSTICS_TESTING
+/* PUBLIC_INTERFACE */
+void rbuscore_SetTestBrokerAddress(const char* broker_address)
+{
+    if(broker_address == NULL || broker_address[0] == '\0')
+    {
+        g_test_daemon_address[0] = '\0';
+        return;
+    }
+
+    rtString_Copy(g_test_daemon_address, broker_address,
+        MAX_DAEMON_ADDRESS_LEN);
+}
+#endif
 
 rbusCoreError_t rbus_openBrokerConnection(const char * component_name)
 {
@@ -637,6 +665,13 @@ rbusCoreError_t rbus_openBrokerConnection2(const char * component_name, const ch
     if(broker_address == NULL)
     {
         configure_router_address();/*this allows devices with split cpu environment to connect to rtrouted over tcp*/
+#ifdef RBUS_DIAGNOSTICS_TESTING
+        if(g_test_daemon_address[0] != '\0')
+        {
+            broker_address = g_test_daemon_address;
+        }
+        else
+#endif
         broker_address = g_daemon_address;
     }
 

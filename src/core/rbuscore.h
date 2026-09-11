@@ -60,6 +60,21 @@ typedef struct
 rbusCoreError_t rbus_openBrokerConnection(const char * component_name);
 rbusCoreError_t rbus_openBrokerConnection2(const char * component_name, const char * broker_address);
 
+#ifdef RBUS_DIAGNOSTICS_TESTING
+/* PUBLIC_INTERFACE */
+/**
+ * Sets the broker endpoint used only by diagnostics-enabled unit-test builds.
+ *
+ * @param broker_address A non-empty, bounded RBus broker address, or NULL to
+ * restore normal production configuration-file behavior.
+ *
+ * This private core test seam is unavailable in production builds. It exists
+ * so forked live-operation tests can use their temporary broker without
+ * observing a machine-specific `/etc/rbus_client.conf`.
+ */
+void rbuscore_SetTestBrokerAddress(const char* broker_address);
+#endif
+
 /* Close connection with daemon. Messaging services will cease. */
 rbusCoreError_t rbus_closeBrokerConnection(void);
 

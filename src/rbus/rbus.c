@@ -39,6 +39,7 @@
 #include "rbus_log.h"
 #include "rbus_handle.h"
 #include "rbus_message.h"
+#include "rbus_diagnostics_client.h"
 
 //******************************* MACROS *****************************************//
 #define UNUSED1(a)              (void)(a)
@@ -3393,6 +3394,10 @@ rbusError_t rbus_regDataElements(
             sDisConnHandler = true;
     }
 #endif
+    if (rc == RBUS_ERROR_SUCCESS)
+    {
+        rbusDiagnostics_PublishProviderLifecycle(handleInfo->componentName, true);
+    }
     return rc;
 }
 
@@ -3404,6 +3409,7 @@ rbusError_t rbus_unregDataElements(
     VERIFY_HANDLE(handle);
     struct _rbusHandle* handleInfo = (struct _rbusHandle*)handle;
     int i;
+    bool allElementsRemoved = true;
 
     VERIFY_NULL(handleInfo);
     VERIFY_NULL(elements);
@@ -3419,13 +3425,24 @@ rbusError_t rbus_unregDataElements(
         if(rbus_unregisterEvent(handleInfo->componentName, name) != RBUSCORE_SUCCESS)
             RBUSLOG_INFO("failed to remove event [%s]!!", name);
 */
-        if(rbus_removeElement(handleInfo->componentName, name) != RBUSCORE_SUCCESS)
+        if(
+#ifdef RBUS_DIAGNOSTICS_TESTING
+            rbusDiagnostics_ShouldFailRemovalForTest() ||
+#endif
+            rbus_removeElement(handleInfo->componentName, name) != RBUSCORE_SUCCESS)
+        {
             RBUSLOG_WARN("failed to remove element from core [%s]!!", name);
+            allElementsRemoved = false;
+        }
 
 /*      TODO: we need to remove all instance elements that this registration element instantiated
         rbusValueChange_RemoveParameter(handle, NULL, name);
         removeElement(&(handleInfo->elementRoot), name);
 */
+    }
+    if (allElementsRemoved)
+    {
+        rbusDiagnostics_PublishProviderLifecycle(handleInfo->componentName, false);
     }
     return RBUS_ERROR_SUCCESS;
 }
@@ -3489,6 +3506,7 @@ rbusError_t rbus_get(rbusHandle_t handle, char const* name, rbusValue_t* value)
 {
     rbusError_t errorcode = RBUS_ERROR_SUCCESS;
     rbusCoreError_t err = RBUSCORE_SUCCESS;
+    rbusDiagnosticsTimer_t diagnosticsTimer = rbusDiagnostics_TimerStart();
     VERIFY_HANDLE(handle);
     rbusMessage request, response;
     int ret = -1;
@@ -3579,6 +3597,11 @@ rbusError_t rbus_get(rbusHandle_t handle, char const* name, rbusValue_t* value)
         }
         rbusMessage_Release(response);
     }
+    rbusDiagnostics_Publish(
+        &diagnosticsTimer,
+        RBUS_DIAGNOSTICS_OPERATION_GET,
+        name,
+        errorcode);
     return errorcode;
 }
 
@@ -4080,7 +4103,15 @@ rbusError_t _setInternal(rbusHandle_t handle, char const* name, rbusValue_t valu
 
 rbusError_t rbus_set(rbusHandle_t handle, char const* name,rbusValue_t value, rbusSetOptions_t* opts)
 {
-    return _setInternal(handle, name, value, opts, 0);
+    rbusDiagnosticsTimer_t diagnosticsTimer = rbusDiagnostics_TimerStart();
+    rbusError_t result = _setInternal(handle, name, value, opts, 0);
+
+    rbusDiagnostics_Publish(
+        &diagnosticsTimer,
+        RBUS_DIAGNOSTICS_OPERATION_SET,
+        name,
+        result);
+    return result;
 }
 
 rbusError_t rbus_setCommit(rbusHandle_t handle, char const* name, rbusSetOptions_t* opts)
@@ -6164,6 +6195,9 @@ rbusError_t rbusMethod_Invoke(
     rbusObject_t inParams,
     rbusObject_t* outParams)
 {
+    rbusDiagnosticsTimer_t diagnosticsTimer = rbusDiagnostics_TimerStart();
+    rbusError_t result;
+
     VERIFY_HANDLE(handle);
     VERIFY_NULL(methodName);
     VERIFY_NULL(outParams);
@@ -6173,7 +6207,18 @@ rbusError_t rbusMethod_Invoke(
     if (handleInfo->m_handleType != RBUS_HWDL_TYPE_REGULAR)
         return RBUS_ERROR_INVALID_HANDLE;
 
-    return rbusMethod_InvokeInternal(handle, methodName, inParams, outParams, rbusHandle_FetchSetTimeout(handle));
+    result = rbusMethod_InvokeInternal(
+        handle,
+        methodName,
+        inParams,
+        outParams,
+        rbusHandle_FetchSetTimeout(handle));
+    rbusDiagnostics_Publish(
+        &diagnosticsTimer,
+        RBUS_DIAGNOSTICS_OPERATION_METHOD,
+        methodName,
+        result);
+    return result;
 }
 
 typedef struct _rbusMethodInvokeAsyncData_t
@@ -6183,6 +6228,7 @@ typedef struct _rbusMethodInvokeAsyncData_t
     rbusObject_t inParams;
     rbusMethodAsyncRespHandler_t callback;
     int timeout;
+    rbusDiagnosticsTimer_t diagnosticsTimer;
 } rbusMethodInvokeAsyncData_t;
 
 static void* rbusMethod_InvokeAsyncThreadFunc(void *p)
@@ -6199,6 +6245,12 @@ static void* rbusMethod_InvokeAsyncThreadFunc(void *p)
         &outParams,
         data->timeout);
 
+    /* Preserve callback sequencing: observe the final result immediately before it. */
+    rbusDiagnostics_Publish(
+        &data->diagnosticsTimer,
+        RBUS_DIAGNOSTICS_OPERATION_METHOD,
+        data->methodName,
+        err);
     data->callback(data->handle, data->methodName, err, outParams);
 
     rbusObject_Release(data->inParams);
@@ -6225,6 +6277,7 @@ rbusError_t rbusMethod_InvokeAsync(
     pthread_t pid;
     rbusMethodInvokeAsyncData_t* data;
     int err = 0;
+    rbusDiagnosticsTimer_t diagnosticsTimer = rbusDiagnostics_TimerStart();
 
     if (handleInfo->m_handleType != RBUS_HWDL_TYPE_REGULAR)
         return RBUS_ERROR_INVALID_HANDLE;
@@ -6237,10 +6290,31 @@ rbusError_t rbusMethod_InvokeAsync(
     data->inParams = inParams;
     data->callback = callback;
     data->timeout = timeout > 0 ? (timeout * 1000) : (int)rbusHandle_FetchSetTimeout(handle); /* convert seconds to milliseconds */
+    data->diagnosticsTimer = diagnosticsTimer;
 
-    if((err = pthread_create(&pid, NULL, rbusMethod_InvokeAsyncThreadFunc, data)) != 0)
+#ifdef RBUS_DIAGNOSTICS_TESTING
+    /*
+     * Test builds can deterministically exercise this existing terminal
+     * failure path. Production builds always call pthread_create directly.
+     */
+    if (rbusDiagnostics_ShouldFailAsyncSchedulingForTest())
+    {
+        err = EAGAIN;
+    }
+    else
+#endif
+    {
+        err = pthread_create(&pid, NULL, rbusMethod_InvokeAsyncThreadFunc, data);
+    }
+
+    if(err != 0)
     {
         RBUSLOG_ERROR("pthread_create failed: err=%d", err);
+        rbusDiagnostics_Publish(
+            &diagnosticsTimer,
+            RBUS_DIAGNOSTICS_OPERATION_METHOD,
+            methodName,
+            RBUS_ERROR_BUS_ERROR);
         return RBUS_ERROR_BUS_ERROR;
     }
 

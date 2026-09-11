@@ -76,6 +76,29 @@ target_link_libraries(rbus_event_server rbuscore)
 
 enable_testing()
 
+add_executable(rbus_diagnostics_disabled_tests
+  test_rbus_diagnostics_disabled.c)
+add_test(NAME rbus-diagnostics-disabled-tests
+  COMMAND rbus_diagnostics_disabled_tests)
+
+if (ENABLE_RBUS_DIAGNOSTICS)
+    # The test embeds the publisher implementation and fakes its socket calls
+    # so frame contents and nonblocking error paths remain deterministic.
+    add_executable(rbus_diagnostics_publisher_tests
+      test_rbus_diagnostics_publisher.c)
+    target_compile_definitions(rbus_diagnostics_publisher_tests PRIVATE
+      ENABLE_RBUS_DIAGNOSTICS
+      RBUS_DIAGNOSTICS_TESTING)
+    target_include_directories(rbus_diagnostics_publisher_tests PRIVATE
+      ${PROJECT_SOURCE_DIR}/include
+      ${PROJECT_SOURCE_DIR}/src/rbus)
+    add_test(NAME rbus-diagnostics-publisher-tests
+      COMMAND rbus_diagnostics_publisher_tests)
+
+    set_source_files_properties(test_rbus_diagnostics_operations.cpp
+      PROPERTIES COMPILE_DEFINITIONS RBUS_DIAGNOSTICS_TESTING)
+endif ()
+
 add_executable(rbus_gtest.bin
   rbusValueTest.cpp
   rbusTokenTest.cpp
@@ -98,6 +121,7 @@ add_executable(rbus_gtest.bin
   rbus_unit_test_nested_servers.cpp
   rbus_unit_test_event_client.cpp
   rbus_unit_test_event_server.cpp
+  test_rbus_diagnostics_operations.cpp
   util.cpp
   main.cpp)
 add_dependencies(rbus_gtest.bin rbus)

@@ -27,6 +27,11 @@ add_dependencies(rbuscore msgpack rtMessage)
 
 target_link_libraries(rbuscore rtMessage ${MSGPACK_LIBRARIES} -lpthread)
 
+if (ENABLE_RBUS_DIAGNOSTICS AND ENABLE_UNIT_TESTING)
+    # Keep the broker override out of ordinary diagnostics and production builds.
+    target_compile_definitions(rbuscore PRIVATE RBUS_DIAGNOSTICS_TESTING)
+endif ()
+
 set_target_properties(rbuscore
     PROPERTIES SOVERSION "0"
     VERSION "${PROJECT_VERSION}")

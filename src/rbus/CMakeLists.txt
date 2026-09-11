@@ -42,6 +42,15 @@ add_library(
     rbus_asyncsubscribe.c
     rbus_intervalsubscription.c)
 
+if (ENABLE_RBUS_DIAGNOSTICS)
+    target_sources(rbus PRIVATE rbus_diagnostics_client.c)
+    target_compile_definitions(rbus PRIVATE ENABLE_RBUS_DIAGNOSTICS)
+    if (ENABLE_UNIT_TESTING)
+        # Expose the private publish observer only to the diagnostics test build.
+        target_compile_definitions(rbus PRIVATE RBUS_DIAGNOSTICS_TESTING)
+    endif ()
+endif ()
+
 target_link_libraries(rbus rbuscore rtMessage -fPIC -pthread)
 
 target_include_directories (rbus PUBLIC ${RDKLOGGER_INCLUDE_DIRS})
