@@ -99,13 +99,18 @@ add_executable(rbus_gtest.bin
   rbus_unit_test_event_client.cpp
   rbus_unit_test_event_server.cpp
   util.cpp
-  main.cpp)
+  main.cpp
+  $<$<BOOL:${RBUS_ENABLE_DIAGNOSTICS}>:test_rbus_diagnostics.cpp>)
 add_dependencies(rbus_gtest.bin rbus)
 
 if (NOT GTEST_LIBRARIES)
     target_link_libraries(rbus_gtest.bin rbus libgtest libgmock gcov)
 else ()
     target_link_libraries(rbus_gtest.bin rbus gtest gcov)
+endif()
+
+if (RBUS_ENABLE_DIAGNOSTICS)
+    target_link_libraries(rbus_gtest.bin rbus_diagnostics)
 endif()
 
 install (TARGETS rbus_event_server rbus_test_server rbus_gtest.bin

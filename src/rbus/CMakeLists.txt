@@ -40,7 +40,9 @@ add_library(
     rbus_subscriptions.c
     rbus_tokenchain.c
     rbus_asyncsubscribe.c
-    rbus_intervalsubscription.c)
+    rbus_intervalsubscription.c
+    $<$<BOOL:${RBUS_ENABLE_DIAGNOSTICS}>:rbus_diagnostics_clock.c>
+    $<$<BOOL:${RBUS_ENABLE_DIAGNOSTICS}>:rbus_diagnostics_collector.c>)
 
 target_link_libraries(rbus rbuscore rtMessage -fPIC -pthread)
 
@@ -55,6 +57,34 @@ install (TARGETS rbus
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
 install (DIRECTORY ${PROJECT_SOURCE_DIR}/include/ DESTINATION "include/rbus")
+
+if (RBUS_ENABLE_DIAGNOSTICS)
+  target_compile_definitions(rbus PRIVATE RBUS_ENABLE_DIAGNOSTICS)
+
+  add_library(
+      rbus_diagnostics
+      SHARED
+      rbus_diagnostics_snapshot.c)
+
+  target_link_libraries(rbus_diagnostics rbus -pthread)
+  target_include_directories(
+      rbus_diagnostics
+      PRIVATE
+      ${PROJECT_SOURCE_DIR}/include
+      ${PROJECT_SOURCE_DIR}/src/rbus)
+
+  set_target_properties(rbus_diagnostics PROPERTIES
+      SOVERSION "${RBUS_DIAGNOSTICS_ABI_MAJOR}"
+      VERSION "${RBUS_DIAGNOSTICS_ABI_MAJOR}.${RBUS_DIAGNOSTICS_ABI_MINOR}")
+
+  install(TARGETS rbus_diagnostics
+      RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+      LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  install(FILES
+      ${CMAKE_CURRENT_SOURCE_DIR}/rbus_diagnostics_private.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/rbus_diagnostics_types.h
+      DESTINATION "include/rbus-private")
+endif (RBUS_ENABLE_DIAGNOSTICS)
 
 if (MSG_ROUNDTRIP_TIME)
   message("Message rountrip time calculation enabled")

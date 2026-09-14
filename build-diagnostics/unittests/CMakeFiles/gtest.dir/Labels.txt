@@ -1,0 +1,13 @@
+# Target labels
+ gtest
+# Source files and their labels
+/home/kavia/workspace/code-generation/rbus-10000000330/build-diagnostics/unittests/CMakeFiles/gtest
+/home/kavia/workspace/code-generation/rbus-10000000330/build-diagnostics/unittests/CMakeFiles/gtest.rule
+/home/kavia/workspace/code-generation/rbus-10000000330/build-diagnostics/unittests/CMakeFiles/gtest-complete.rule
+/home/kavia/workspace/code-generation/rbus-10000000330/build-diagnostics/unittests/gtest/src/gtest-stamp/gtest-build.rule
+/home/kavia/workspace/code-generation/rbus-10000000330/build-diagnostics/unittests/gtest/src/gtest-stamp/gtest-configure.rule
+/home/kavia/workspace/code-generation/rbus-10000000330/build-diagnostics/unittests/gtest/src/gtest-stamp/gtest-download.rule
+/home/kavia/workspace/code-generation/rbus-10000000330/build-diagnostics/unittests/gtest/src/gtest-stamp/gtest-install.rule
+/home/kavia/workspace/code-generation/rbus-10000000330/build-diagnostics/unittests/gtest/src/gtest-stamp/gtest-mkdir.rule
+/home/kavia/workspace/code-generation/rbus-10000000330/build-diagnostics/unittests/gtest/src/gtest-stamp/gtest-patch.rule
+/home/kavia/workspace/code-generation/rbus-10000000330/build-diagnostics/unittests/gtest/src/gtest-stamp/gtest-update.rule

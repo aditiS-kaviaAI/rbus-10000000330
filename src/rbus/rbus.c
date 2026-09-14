@@ -40,6 +40,36 @@
 #include "rbus_handle.h"
 #include "rbus_message.h"
 
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+#include "rbus_diagnostics_collector.h"
+
+/*
+ * Record metadata only after the normal RBus result is finalized. The initial
+ * enabled check prevents clock reads when runtime collection is disabled.
+ */
+static void rbusDiagnostics_RecordBrokerCompletion(
+    rbus_diagnostics_operation_kind_t operation,
+    const char* operation_name,
+    uint64_t started_monotonic_us,
+    rbusError_t result)
+{
+    rbus_diagnostics_observation_t observation;
+
+    if (!rbusDiagnosticsCollector_IsEnabled())
+    {
+        return;
+    }
+
+    memset(&observation, 0, sizeof(observation));
+    observation.operation = operation;
+    observation.rbus_result = result;
+    observation.started_monotonic_us = started_monotonic_us;
+    observation.completed_monotonic_us = rbusDiagnosticsClock_NowMonotonicUs();
+    observation.operation_name = operation_name;
+    rbusDiagnosticsCollector_RecordCompleted(&observation);
+}
+#endif
+
 //******************************* MACROS *****************************************//
 #define UNUSED1(a)              (void)(a)
 #define UNUSED2(a,b)            UNUSED1(a),UNUSED1(b)
@@ -3493,6 +3523,10 @@ rbusError_t rbus_get(rbusHandle_t handle, char const* name, rbusValue_t* value)
     rbusMessage request, response;
     int ret = -1;
     struct _rbusHandle* handleInfo = (struct _rbusHandle*) handle;
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    bool diagnostics_active;
+    uint64_t diagnostics_started_monotonic_us = 0U;
+#endif
 
     VERIFY_NULL(handleInfo);
 
@@ -3524,9 +3558,16 @@ rbusError_t rbus_get(rbusHandle_t handle, char const* name, rbusValue_t* value)
     /* Find direct connection status */
     rtConnection myConn = rbuscore_FindClientPrivateConnection(name);
 
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    diagnostics_active = (myConn == NULL) && rbusDiagnosticsCollector_IsEnabled();
+#endif
     if (NULL == myConn)
         myConn = handleInfo->m_connection;
 
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    if (diagnostics_active)
+        diagnostics_started_monotonic_us = rbusDiagnosticsClock_NowMonotonicUs();
+#endif
     err = rbus_invokeRemoteMethod2(myConn, name, METHOD_GETPARAMETERVALUES, request, rbusHandle_FetchGetTimeout(handle), &response);
 
     if(err != RBUSCORE_SUCCESS)
@@ -3579,6 +3620,14 @@ rbusError_t rbus_get(rbusHandle_t handle, char const* name, rbusValue_t* value)
         }
         rbusMessage_Release(response);
     }
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    if (diagnostics_active)
+        rbusDiagnostics_RecordBrokerCompletion(
+            RBUS_DIAGNOSTICS_OPERATION_GET,
+            name,
+            diagnostics_started_monotonic_us,
+            errorcode);
+#endif
     return errorcode;
 }
 
@@ -3996,6 +4045,10 @@ rbusError_t _setInternal(rbusHandle_t handle, char const* name, rbusValue_t valu
     VERIFY_HANDLE(handle);
     rbusMessage setRequest, setResponse;
     struct _rbusHandle* handleInfo = (struct _rbusHandle*) handle;
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    bool diagnostics_active;
+    uint64_t diagnostics_started_monotonic_us = 0U;
+#endif
 
     VERIFY_NULL(handle);
     VERIFY_NULL(name);
@@ -4035,12 +4088,19 @@ rbusError_t _setInternal(rbusHandle_t handle, char const* name, rbusValue_t valu
     /* Find direct connection status */
     rtConnection myConn = rbuscore_FindClientPrivateConnection(name);
 
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    diagnostics_active = (myConn == NULL) && rbusDiagnosticsCollector_IsEnabled();
+#endif
     if (NULL == myConn)
         myConn = handleInfo->m_connection;
 
     if (timeout == 0)
         timeout = rbusHandle_FetchSetTimeout(handle);
 
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    if (diagnostics_active)
+        diagnostics_started_monotonic_us = rbusDiagnosticsClock_NowMonotonicUs();
+#endif
     if((err = rbus_invokeRemoteMethod2(myConn, name, METHOD_SETPARAMETERVALUES, setRequest, timeout, &setResponse)) != RBUSCORE_SUCCESS)
     {
         RBUSLOG_ERROR("%s for %s failed with error: %s", __FUNCTION__, name, rbusCoreErrorToString(err));
@@ -4075,6 +4135,14 @@ rbusError_t _setInternal(rbusHandle_t handle, char const* name, rbusValue_t valu
         /* Release the reponse message */
         rbusMessage_Release(setResponse);
     }
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    if (diagnostics_active)
+        rbusDiagnostics_RecordBrokerCompletion(
+            RBUS_DIAGNOSTICS_OPERATION_SET,
+            name,
+            diagnostics_started_monotonic_us,
+            errorcode);
+#endif
     return errorcode;
 }
 
@@ -4488,6 +4556,10 @@ rbusError_t rbusTable_addRow(
     rbusMessage request, response;
     struct _rbusHandle* handleInfo = (struct _rbusHandle*) handle;
     rbusLegacyReturn_t legacyRetCode = RBUS_LEGACY_ERR_FAILURE;
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    bool diagnostics_active;
+    uint64_t diagnostics_started_monotonic_us = 0U;
+#endif
 
     VERIFY_NULL(handle);
     VERIFY_NULL(tableName);
@@ -4514,9 +4586,16 @@ rbusError_t rbusTable_addRow(
     /* Find direct connection status */
     rtConnection myConn = rbuscore_FindClientPrivateConnection(tableName);
 
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    diagnostics_active = (myConn == NULL) && rbusDiagnosticsCollector_IsEnabled();
+#endif
     if (NULL == myConn)
         myConn = handleInfo->m_connection;
 
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    if (diagnostics_active)
+        diagnostics_started_monotonic_us = rbusDiagnosticsClock_NowMonotonicUs();
+#endif
     if((err = rbus_invokeRemoteMethod2(myConn,
         tableName, /*as taken from ccsp_base_api.c, this was the destination component ID, but to locate the route, the table name can be used
                      because the broker simlpy looks at the top level nodes that are owned by a component route.  maybe this breaks if the broker changes*/
@@ -4526,6 +4605,14 @@ rbusError_t rbusTable_addRow(
         &response)) != RBUSCORE_SUCCESS)
     {
         RBUSLOG_ERROR("%s for %s failed with error: %s", __FUNCTION__, tableName, rbusCoreErrorToString(err));
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+        if (diagnostics_active)
+            rbusDiagnostics_RecordBrokerCompletion(
+                RBUS_DIAGNOSTICS_OPERATION_TABLE,
+                tableName,
+                diagnostics_started_monotonic_us,
+                rbusCoreError_to_rbusError(err));
+#endif
         return rbusCoreError_to_rbusError(err);
     }
     else
@@ -4554,6 +4641,14 @@ rbusError_t rbusTable_addRow(
         rbusMessage_Release(response);
     }
 
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    if (diagnostics_active)
+        rbusDiagnostics_RecordBrokerCompletion(
+            RBUS_DIAGNOSTICS_OPERATION_TABLE,
+            tableName,
+            diagnostics_started_monotonic_us,
+            (rbusError_t)returnCode);
+#endif
     return returnCode;
 }
 
@@ -4566,6 +4661,10 @@ rbusError_t rbusTable_removeRow(
     rbusMessage request, response;
     struct _rbusHandle* handleInfo = (struct _rbusHandle*) handle;
     rbusLegacyReturn_t legacyRetCode = RBUS_LEGACY_ERR_FAILURE;
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    bool diagnostics_active;
+    uint64_t diagnostics_started_monotonic_us = 0U;
+#endif
 
     VERIFY_NULL(handle);
     VERIFY_NULL(rowName);
@@ -4581,9 +4680,16 @@ rbusError_t rbusTable_removeRow(
     /* Find direct connection status */
     rtConnection myConn = rbuscore_FindClientPrivateConnection(rowName);
 
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    diagnostics_active = (myConn == NULL) && rbusDiagnosticsCollector_IsEnabled();
+#endif
     if (NULL == myConn)
         myConn = handleInfo->m_connection;
 
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    if (diagnostics_active)
+        diagnostics_started_monotonic_us = rbusDiagnosticsClock_NowMonotonicUs();
+#endif
     if((err = rbus_invokeRemoteMethod2(myConn,
         rowName,
         METHOD_DELETETBLROW,
@@ -4592,6 +4698,14 @@ rbusError_t rbusTable_removeRow(
         &response)) != RBUSCORE_SUCCESS)
     {
         RBUSLOG_ERROR(" %s for %s failed with error: %s", __FUNCTION__, rowName, rbusCoreErrorToString(err));
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+        if (diagnostics_active)
+            rbusDiagnostics_RecordBrokerCompletion(
+                RBUS_DIAGNOSTICS_OPERATION_TABLE,
+                rowName,
+                diagnostics_started_monotonic_us,
+                rbusCoreError_to_rbusError(err));
+#endif
         return rbusCoreError_to_rbusError(err);
     }
     else
@@ -4616,6 +4730,14 @@ rbusError_t rbusTable_removeRow(
         rbusMessage_Release(response);
     }
 
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    if (diagnostics_active)
+        rbusDiagnostics_RecordBrokerCompletion(
+            RBUS_DIAGNOSTICS_OPERATION_TABLE,
+            rowName,
+            diagnostics_started_monotonic_us,
+            (rbusError_t)returnCode);
+#endif
     return returnCode;
 }
 
@@ -4695,6 +4817,10 @@ rbusError_t rbusTable_getRowNames(
     rbusCoreError_t err = RBUSCORE_SUCCESS;
     rbusMessage request, response;
     struct _rbusHandle* handleInfo = (struct _rbusHandle*) handle;
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    bool diagnostics_active;
+    uint64_t diagnostics_started_monotonic_us = 0U;
+#endif
 
     VERIFY_NULL(handle);
 
@@ -4713,9 +4839,16 @@ rbusError_t rbusTable_getRowNames(
     /* Find direct connection status */
     rtConnection myConn = rbuscore_FindClientPrivateConnection(tableName);
 
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    diagnostics_active = (myConn == NULL) && rbusDiagnosticsCollector_IsEnabled();
+#endif
     if (NULL == myConn)
         myConn = handleInfo->m_connection;
 
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    if (diagnostics_active)
+        diagnostics_started_monotonic_us = rbusDiagnosticsClock_NowMonotonicUs();
+#endif
     if((err = rbus_invokeRemoteMethod2(myConn, tableName, METHOD_GETPARAMETERNAMES, request, rbusHandle_FetchGetTimeout(handle), &response)) == RBUSCORE_SUCCESS)
     {
         rbusLegacyReturn_t legacyRetCode = RBUS_LEGACY_ERR_FAILURE;
@@ -4744,6 +4877,14 @@ rbusError_t rbusTable_getRowNames(
                 {
                     RBUSLOG_ERROR("failed to malloc %d row names", count);
                     rbusMessage_Release(response);
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+                    if (diagnostics_active)
+                        rbusDiagnostics_RecordBrokerCompletion(
+                            RBUS_DIAGNOSTICS_OPERATION_TABLE,
+                            tableName,
+                            diagnostics_started_monotonic_us,
+                            RBUS_ERROR_OUT_OF_RESOURCES);
+#endif
                     return RBUS_ERROR_OUT_OF_RESOURCES;
                 }
             }
@@ -4784,6 +4925,14 @@ rbusError_t rbusTable_getRowNames(
         RBUSLOG_ERROR("getparamnames %s failed with buss err %d", tableName, err);
         errorcode = rbusCoreError_to_rbusError(err);
     }
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    if (diagnostics_active)
+        rbusDiagnostics_RecordBrokerCompletion(
+            RBUS_DIAGNOSTICS_OPERATION_TABLE,
+            tableName,
+            diagnostics_started_monotonic_us,
+            errorcode);
+#endif
     return errorcode;
 }
 
@@ -6084,15 +6233,23 @@ rbusError_t rbusMethod_InvokeInternal(
     char const* methodName,
     rbusObject_t inParams,
     rbusObject_t* outParams,
-    int timeout)
+    int timeout,
+    bool collect_diagnostics)
 {
     (void)handle;
+#ifndef RBUS_ENABLE_DIAGNOSTICS
+    (void)collect_diagnostics;
+#endif
     rbusCoreError_t err;
     int returnCode = RBUS_ERROR_INVALID_INPUT;
     rbusMessage request, response;
     rbusLegacyReturn_t legacyRetCode = RBUS_LEGACY_ERR_FAILURE;
     rbusValue_t value1 = NULL, value2 = NULL;
     struct _rbusHandle* handleInfo = (struct _rbusHandle*) handle;
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    bool diagnostics_active;
+    uint64_t diagnostics_started_monotonic_us = 0U;
+#endif
 
     VERIFY_NULL(handle);
     VERIFY_NULL(methodName);
@@ -6117,9 +6274,17 @@ rbusError_t rbusMethod_InvokeInternal(
     /* Find direct connection status */
     rtConnection myConn = rbuscore_FindClientPrivateConnection(methodName);
 
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    diagnostics_active = collect_diagnostics && (myConn == NULL) &&
+        rbusDiagnosticsCollector_IsEnabled();
+#endif
     if (NULL == myConn)
         myConn = handleInfo->m_connection;
 
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    if (diagnostics_active)
+        diagnostics_started_monotonic_us = rbusDiagnosticsClock_NowMonotonicUs();
+#endif
     if((err = rbus_invokeRemoteMethod2(myConn,
         methodName,
         METHOD_RPC,
@@ -6139,6 +6304,14 @@ rbusError_t rbusMethod_InvokeInternal(
         rbusObject_SetValue(*outParams, "error_string", value2);
         rbusValue_Release(value1);
         rbusValue_Release(value2);
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+        if (diagnostics_active)
+            rbusDiagnostics_RecordBrokerCompletion(
+                RBUS_DIAGNOSTICS_OPERATION_METHOD_SYNC,
+                methodName,
+                diagnostics_started_monotonic_us,
+                rbusCoreError_to_rbusError(err));
+#endif
         return rbusCoreError_to_rbusError(err);
     }
 
@@ -6155,6 +6328,14 @@ rbusError_t rbusMethod_InvokeInternal(
 
     RBUSLOG_DEBUG("Method_InvokeInternal success response with returnCode:%d", returnCode);
 
+#ifdef RBUS_ENABLE_DIAGNOSTICS
+    if (diagnostics_active)
+        rbusDiagnostics_RecordBrokerCompletion(
+            RBUS_DIAGNOSTICS_OPERATION_METHOD_SYNC,
+            methodName,
+            diagnostics_started_monotonic_us,
+            (rbusError_t)returnCode);
+#endif
     return returnCode;
 }
 
@@ -6173,7 +6354,13 @@ rbusError_t rbusMethod_Invoke(
     if (handleInfo->m_handleType != RBUS_HWDL_TYPE_REGULAR)
         return RBUS_ERROR_INVALID_HANDLE;
 
-    return rbusMethod_InvokeInternal(handle, methodName, inParams, outParams, rbusHandle_FetchSetTimeout(handle));
+    return rbusMethod_InvokeInternal(
+        handle,
+        methodName,
+        inParams,
+        outParams,
+        rbusHandle_FetchSetTimeout(handle),
+        true);
 }
 
 typedef struct _rbusMethodInvokeAsyncData_t
@@ -6197,7 +6384,8 @@ static void* rbusMethod_InvokeAsyncThreadFunc(void *p)
         data->methodName,
         data->inParams,
         &outParams,
-        data->timeout);
+        data->timeout,
+        false);
 
     data->callback(data->handle, data->methodName, err, outParams);
 
